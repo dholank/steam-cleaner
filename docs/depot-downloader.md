@@ -1,133 +1,127 @@
 # Depot Downloader: architecture and operations
 
-## Existing project and integration
+## Scope
 
-Before this feature, the complete repository consisted of `clean-steam.ps1`, its safety tests, README, ignore rules and a Windows GitHub Actions workflow. It was Windows PowerShell 5.1-compatible, using Verb-Noun functions, `Write-Host`, `Read-Host`, terminating safety errors and an outer CLI error boundary. There was no GUI, dependency manager, settings store, file-copy abstraction, persistent logger, library finder or explicit cancellation service.
+The original Steam cleaner and its `DELETE` confirmation remain available. Depot Downloader is a separate menu action that downloads account-accessible game files without writing a Steam library manifest, registering an install, running an install script, launching a game, or changing the installed Steam client.
 
-The cleaner entry point and `DELETE` confirmation remain available unchanged. The only extension inside its utilities is `Assert-LocalDirectory -AllowProtectedAncestor`: a caller creating a child of Documents or a drive root can validate that parent's filesystem/link chain. Actual deletion targets still use the original strict checks. The downloader reuses this guard, `Get-CleanupNode` for non-following traversal, and `Find-SteamRoot` to prevent cache/tools/output from overlapping a known client installation.
+The supported automatic target is Windows, x64 or x86, one language, one visible non-password branch, and `DLC=None`. The defaults are Windows, x64, English, and public. Unknown restrictions or incomplete ownership evidence stop the whole automatic operation.
 
-`steam-cleaner.ps1` adds a text menu and dispatches to these components:
+## One Download Location
 
-| Component | Responsibility |
-| --- | --- |
-| `modules/DepotSupport.ps1` | Non-secret JSON settings, validated paths/IDs, structured logging, reuse of cleaner traversal |
-| `modules/SteamCmdClient.ps1` | Detect or install Valve-signed SteamCMD, native interactive login, typed commands, concurrent stdout/stderr capture, timeout and error classification |
-| `modules/AppInfoParser.ps1` | Ordered VDF parsing and extraction of one AppInfo object from console output |
-| `modules/DepotResolver.ps1` | Restrictions, DLC and shared references, selected branch manifests, confidence and reasons |
-| `modules/DepotMetadata.ps1` | Version identity, atomic JSON metadata, local SHA256 inventories, offline metadata validation |
-| `modules/DepotDownloader.ps1` | Download all depots, completion checks, receipts, retries, drift detection, orchestration |
-| `modules/DepotAssembler.ps1` | Collision preflight, merge into staging, hash verification, same-parent final rename |
+Interactive menu use opens a WinForms dialog in an STA PowerShell process. The dialog has an editable path, **Browse...**, **Open Folder**, **Keep temporary depot files**, **Continue**, and **Cancel**. Continue validates or creates the directory and performs a temporary write probe. Cancel does not save anything. Settings are atomically stored at `%LOCALAPPDATA%\SteamCleaner\settings.json`.
 
-The UI contains no depot selection or merge logic. The project stays PowerShell; the small C# fixture in tests is only a fake console executable for process-I/O tests.
+Value precedence is:
 
-## Resolution
+1. Local CLI parameters
+2. Explicit JSON config
+3. Saved dialog settings
+4. `Documents\Steam Cleaner Downloads`
 
-SteamCMD retrieves `app_info_update 1` and `app_info_print <AppID>`. The parser keeps key enumeration order and exact decimal manifest strings, including values above signed 64-bit range. It rejects duplicate keys, truncated objects and unsupported VDF conditionals/directives.
-
-The resolver prefers `config/installdir` exactly, after validating it as one Windows directory component. A malformed supplied InstallDir is an error. Only a missing InstallDir falls back to the sanitized game name. Reserved device names, path separators, traversal, alternate streams, trailing dots/spaces and control characters are rejected.
-
-For each numeric depot entry, without deriving meaning from its ID:
-
-1. Follow `depotfromapp` references with a recursion/cycle limit; inherit source restrictions and manifests. Conflicting restrictions require review.
-2. Exclude DLC, nonselected OS, architecture or language depots with reasons.
-3. Reject unknown applicable restrictions and separately mounted shared-install content as REVIEW.
-4. Select only the chosen branch's visible manifest, accepting scalar and `gid` forms. Never substitute public for a missing beta manifest.
-5. Record source AppID/build, configuration, DLC relationship, expected bytes when available, selected manifest, and ordering confidence.
-
-HIGH means a supported metadata rule clearly decides inclusion/exclusion. Shared-source resolution is MEDIUM. Unresolved potential base depots are LOW/REVIEW and block the entire automatic selection. Overall confidence remains at most MEDIUM because AppInfo enumeration is not an independently verified Steam mount priority. Game names or numbers do not determine selection.
-
-The source branch/build for shared depots can differ from the parent application's build; both are tracked. After all downloads, AppInfo is fetched again, including shared sources, and the selected configuration/build/manifest fingerprint is compared. Drift prevents automatic assembly. The pinned downloaded snapshot remains available for deliberate offline reassembly.
-
-## SteamCMD and authentication
-
-Detection uses an explicitly configured `SteamCmdPath`, the managed ToolsRoot, then PATH. If absent, only `steamcmd.exe` is extracted from Valve's HTTPS bootstrap ZIP, and a valid Valve Authenticode signature is required before execution. No arbitrary archive path is extracted.
-
-For a named account, SteamCMD runs interactively with `+login <username> +quit`. Password/Guard handling belongs to the native terminal. The application does not intercept, save or log this session. Do not use PowerShell transcription during authentication. SteamCMD itself may maintain its own cached login/session files in its tools directory; protect that directory and do not publish it.
-
-Subsequent operations use cached authentication with `@NoPromptForPassword 1`. If that session cannot be reused, the operation fails with instructions to authenticate again. No password, Guard code, Steam API key or branch password setting exists. SteamCMD performs actual ownership checks; retail games generally require an owning account. Native login failure details are visible in the native terminal, while captured operations use actionable error categories.
-
-All automated commands are constructed from validated IDs and a validated login name. AppInfo text is never executed. The wrapper captures both output streams in memory concurrently, checks exit status and Steam-specific errors, and does not persist raw transcripts. A timed-out/cancelled captured operation terminates its owned child process in `finally`. Do not run another SteamCMD process against the same tools folder concurrently; the app uses locks to serialize its own workflows.
-
-Progress reports the current depot and elapsed time. It does not invent a percentage when SteamCMD supplies no reliable percentage stream.
-
-## Downloads, metadata and retry
+`DownloadRoot` is the only content-location input. For AppID `123` and InstallDir `Game`, paths are derived as:
 
 ```text
-DepotCache/
-  download-<time>-<id>.log
-  <AppID>/
-    <configuration-and-manifest-fingerprint>/
+<DownloadRoot>\
+  .depot-cache\
+    123\
       metadata.json
-      depot_<ID>.receipt.json
-      depot_<ID>/...
-      depot_<other-ID>/...
+      receipt_<DepotID>.json
+      depot_<DepotID>\...
+      stale\...
+  Game\...
 ```
 
-The extra fingerprint level keeps versions/configurations isolated. Within each snapshot, raw depot contents remain separate. A receipt identifies the pinned manifest, completion time and per-file length/SHA256 inventory. `metadata.json` contains the full plan, all decisions, build/configuration identity and every completed receipt. It is written as Downloaded only after **all** selected depots succeeded.
+Legacy `CacheRoot`/`OutputRoot` config migrates only when `CacheRoot` is exactly `<OutputRoot>\.depot-cache`. Any other combination stops with migration guidance and no old data is moved.
 
-SteamCMD writes under its own `steamapps/content/app_<AppID>/depot_<DepotID>`. Earlier contents there are renamed to a unique `.previous-*` sibling before a fresh download, so stale files cannot contaminate another manifest. A success message must name the expected directory and manifest. Reported file count and AppInfo byte size are checked when supplied. Data is copied into a cache `.incoming-*` folder, verified, then renamed into the stable raw depot folder.
+If the final output already exists, interactive use allows a different Download Location or Cancel. Scripted use stops with the same guidance. This version does not update or replace existing output.
 
-Retrying the same AppID/settings resolves the same snapshot and hashes completed cached depots before reuse. It downloads only depots without a completed cache receipt. Interrupted native SteamCMD spool/incoming directories are preserved for diagnosis, not silently trusted; individual partial native downloads are not resumed in place. An orphan stable cache without a valid receipt requires a new cache location or manual inspection. Cached corruption stops rather than silently substituting another version.
+## SteamCMD and entitlement
 
-Local SHA256 inventories detect later corruption and verify copied/assembled bytes. They are **not** an independent implementation of Steam manifest signatures or a guarantee that publisher depot selection is complete. SteamCMD remains responsible for its CDN/manifest download protocol.
+SteamCMD is detected from `SteamCmdPath`, the managed tools directory, or PATH. If it must be bootstrapped, only `steamcmd.exe` is extracted from Valve's HTTPS ZIP and its Valve Authenticode signature is required. Password and Steam Guard prompts belong to SteamCMD's native terminal; the project does not accept, capture, or log them.
 
-## Assembly and collisions
+The typed wrapper supports `app_info_print`, `licenses_for_app`, `licenses_print`, `package_info_print`, `help download_depot`, and `download_depot`. IDs, account names, working directories, and optional destination paths are validated before a process starts. Captured stdout and stderr are drained concurrently. Raw transcripts, passwords, Guard codes, access tokens, and package tokens are never written to the project log.
 
-All raw sources are checked first. File/directory conflicts always stop. Identical file collisions can merge safely. Different-content file collisions stop under the default `CollisionPolicy=Stop`. Logs identify the relative path, existing depot, incoming depot and decision.
+The resolver works in this order:
 
-An explicit `CollisionPolicy=AppInfoOrder` uses preserved AppInfo order, with later depots winning; it still labels that order as unverified. Depot IDs are never numerically sorted for mounting. The override affects collisions only and cannot bypass REVIEW depots, invalid paths, missing manifests or failed downloads.
+1. Confirm each numeric depot belongs to the target AppInfo or a resolved shared source app.
+2. Get relevant active package IDs from SteamCMD license metadata.
+3. Parse each package's `appids` and `depotids` grant lists.
+4. Classify entitlement as true, false, or unknown.
+5. Apply DLC, OS, architecture, language, branch, manifest, shared-depot, and mount-order rules.
 
-Merge uses Windows robocopy `/E /COPY:DAT /DCOPY:DAT /R:1 /W:1 /XJ` into `<InstallDir>.assembling-<unique-id>`, never `/MIR`. Expected merged file hashes are verified before the staging folder is renamed to `<InstallDir>` in the same parent. Existing destinations are refused; select another OutputRoot or cancel. No existing game is deleted or replaced automatically.
+An explicit active-package depot grant is eligible for selection. A depot absent from complete package grants is `SKIP/HIGH`. An app-level grant with an incomplete depot list is `REVIEW/LOW`, so no ambiguous depot is downloaded. A required shared depot checks its source app/package: unowned is an error and unknown is review. SteamCMD access failures explain ownership, edition, DLC, or branch checks the user can make.
 
-On disk-full, locked-file, permission, integrity or other assembly errors, raw cache and existing output remain. Partial staging remains clearly named for inspection. Check available space and retry assembly from metadata into an unused output location.
+Owned DLC remains skipped under `DLC=None`. A zero-byte selected depot is recorded but neither downloaded nor merged. Steamworks Common Redistributables are skipped only when source AppInfo validates both their Steam component AppID and exact identity; there is no game-specific mapping.
 
-The default keeps raw cache. After success, `n` then `DELETE` deletes only the selected raw folders of that snapshot after the verified assembly result. Metadata/receipts remain, but offline reassembly then requires restoring raw files. This action deliberately does not delete SteamCMD's separate spool or `.previous-*` directories. Those may include earlier native downloads; manage them separately after checking their contents.
+Every decision records entitlement, selection, decision, reason, confidence, content kind, manifest, download state, mount order, source AppID/build, and source package IDs.
 
-## Settings and manual testing
+## Destination, capacity, and download lifecycle
 
-Copy `config/depot-settings.example.json` to an ignored `config/depot-settings.json` and adjust paths to existing local drives. Do not put credentials in the file. Unrecognized settings are rejected.
+The client checks `help download_depot` for a destination argument. When available, each depot downloads directly to its cache directory. Otherwise a managed SteamCMD runtime is placed under `<DownloadRoot>\.depot-cache\_steamcmd-runtime`; its normal spool therefore remains on the selected drive, and completed data is copied and hash-verified into the AppID cache.
 
-Defaults are Windows/x64/English/public/no DLC. Version 1 also accepts x86, other language tokens and visible non-password branch names. Linux/macOS downloading, Owned-DLC selection and encrypted/private branches are not implemented. The separated settings/resolver/metadata interfaces make these future additions possible without altering the cleaner.
+Before download, the tool estimates peak use as remaining raw depot bytes plus assembly staging bytes plus ten percent headroom, with a minimum 1 GiB headroom. A proven shortage is a hard stop. Missing depot sizes produce an explicit estimate warning.
 
-1. Run the original cleaner's `-PreviewOnly` flow to check compatibility without deleting client data.
-2. Run `steam-cleaner.ps1`, choose Depot Downloader, provide settings (or Enter for defaults), AppID, and a login account with access.
-3. Complete native login/Guard prompts. Inspect the resolver decisions.
-4. Confirm the resulting directory contains game files directly, plus a separate cache snapshot with metadata and receipts.
-5. Keep cache, choose a different OutputRoot, and use `-Action Reassemble -MetadataPath <snapshot metadata>` to test offline reconstruction.
-6. For games requiring Steam, use normal Steam install/discovery/verification later. Do not expect assembled files alone to create a working Steam installation.
+`metadata.json` is written atomically at `Planned`, updated during `Downloading` and after every depot, then records `Downloaded`, `Assembling`, and `Complete` or a failure state. Each completed depot has a separate receipt and SHA256 inventory. A retry reuses only an exact ManifestID receipt whose inventory still matches. Mismatched or incomplete stable data moves into the AppID's `stale` directory before a new download.
 
-Automated, network-free checks:
+After every selected depot completes, AppInfo, package entitlement, build, branch, manifests, and the plan fingerprint are resolved again. Any drift stops assembly and preserves the cache.
+
+Logs use `%LOCALAPPDATA%\SteamCleaner\logs`. They contain structured decisions and paths, not raw SteamCMD authentication or license transcripts.
+
+## Assembly and cleanup
+
+Assembly sorts by stored `MountOrder`, never numeric DepotID. Later mounted depots replace earlier files according to [Valve's depot mounting rule](https://partner.steamgames.com/doc/store/application/depots). All file collisions are logged. HIGH or MEDIUM order confidence permits later-wins assembly; LOW confidence becomes review before assembly. File/directory shape conflicts always stop.
+
+Raw inventories are verified before copying. Robocopy merges into `<InstallDir>.assembling-<id>` in the Download Location, the complete merged inventory and hashes are verified, and the directory is renamed to `<InstallDir>` in the same parent. A previous final output is never deleted or replaced.
+
+After verified success:
+
+- `KeepTemporaryDepots=false` removes exactly `.depot-cache\<AppID>` and removes `.depot-cache` only if empty.
+- `KeepTemporaryDepots=true` keeps metadata, receipts, stale data, and raw depots.
+
+Every failure keeps the AppID cache. A failed assembly with complete receipts can be retried locally with `-Action Reassemble` and the exact metadata path. A successful result says **Files Ready / Assembly Complete** and reminds the user that Steam installation state and prerequisites were not changed.
+
+## Commands
+
+Interactive launcher:
+
+```powershell
+irm https://raw.githubusercontent.com/dholank/steam-cleaner/main/steam-cleaner.ps1 | iex
+```
+
+Local, noninteractive download:
+
+```powershell
+.\steam-cleaner.ps1 -Action Download -AppId 2651280 -UserName myaccount -DownloadRoot 'D:\Steam Cleaner Downloads' -KeepTemporaryDepots $false
+```
+
+Offline reassembly from a retained cache:
+
+```powershell
+.\steam-cleaner.ps1 -Action Reassemble -MetadataPath 'D:\Steam Cleaner Downloads\.depot-cache\2651280\metadata.json' -DownloadRoot 'D:\Steam Cleaner Downloads'
+```
+
+Run all offline tests:
 
 ```powershell
 powershell -NoProfile -File .\tests\run-tests.ps1
 pwsh -NoProfile -File .\tests\run-tests.ps1
 ```
 
-The process fixture is compiled with Windows PowerShell's bundled compiler. No paid game/account is used in any default test. CI runs both shells. Syntax parsing is the project's static check; no external linter/typechecker/build system was previously configured.
+GitHub Actions runs syntax validation and the full suite in Windows PowerShell 5.1 and PowerShell 7. The suite covers the original 77 checks plus settings/UI adapters, package grants, unknown entitlement, generic edition fixtures, DLC, zero-byte and shared depots, Common Redistributables, destination/fallback behavior, exact cache paths, retry/stale handling, disk capacity, cleanup, collision order, transactional output, and prohibited Steam state changes.
 
-Optional live **metadata-only** test (downloads/initializes SteamCMD, but no game depots):
+Optional live metadata smoke test:
 
 ```powershell
 pwsh -NoProfile -File .\tests\integration-steamcmd.ps1 -ToolsRoot 'D:\SteamCleanerSmoke\SteamCMD' -AppId 90
 ```
 
-Development validation: offline suites exercise filters, parser, shared sources, ambiguity, exact manifest IDs, serialization, collision handling, rollback boundaries, retry, drift, process streams/errors/timeouts and existing cleaner behavior. The development environment could not establish TLS to Valve's CDN, so live SteamCMD bootstrap/login/depot download were not verified here. Do not treat offline fixtures as proof that every publisher layout works.
+This optional test initializes SteamCMD and reads metadata; it does not download game depots.
 
-## Boundaries and future work
+## Limits
 
-- Assembly outputs files, not a Steam-installed state. No `appmanifest_<appid>.acf` is forged and no prerequisite, DRM, launcher, anti-cheat or installscript is run.
-- Password-protected manifests and unknown depot restrictions stop for review. Some applications do not expose enough metadata through the chosen account.
-- Shared-install layouts requiring a separate target are blocked rather than flattened incorrectly. Owned DLC and richer publisher mounting rules need additional metadata/entitlement support.
-- Robocopy supports long paths, but Windows PowerShell 5.1/.NET filesystem and hash operations may still reject some deep paths. Prefer PowerShell 7 and short cache/output roots; failures preserve source data.
-- Verification currently uses in-memory inventories. Very large file counts can use substantial memory; streaming inventory storage and independent manifest-level checks are future improvements.
-- Native spool, raw cache and final output can occupy roughly three copies, plus preserved interrupted/old data. No automatic deletion reclaims earlier spool snapshots.
-- Version-1 output handling is choose-another-directory/cancel. Transactional replacement with a retained backup, richer resume/update, and a cache browser can build on existing metadata.
-- Filesystem checks are not a security boundary against another process actively swapping paths after validation. Keep tools/cache/output under your own control during operations.
+- Encrypted or password-protected branches and unsupported VDF conditions require review.
+- SteamCMD package output can be incomplete for some products; incomplete evidence deliberately stops instead of guessing.
+- Assembly creates files only. Use normal Steam install/discovery/verification later when a game requires Steam, DRM, launchers, anti-cheat, or prerequisites.
+- SHA256 inventories verify local transfer and assembly integrity; SteamCMD remains responsible for CDN and manifest authenticity.
+- PowerShell 7 is preferred for very deep paths and large file counts. Both Windows PowerShell 5.1 and PowerShell 7 are supported and tested.
 
-## Protocol references
-
-- [Valve SteamCMD documentation](https://developer.valvesoftware.com/wiki/SteamCMD): installation and authentication workflow.
-- [Valve depot mounting rules](https://partner.steamgames.com/doc/store/application/depots): OS, architecture, language, DLC restrictions and later-depot precedence.
-- [SteamRE DepotDownloader implementation](https://github.com/SteamRE/DepotDownloader/blob/master/DepotDownloader/ContentDownloader.cs): reference for AppInfo shared-depot and scalar/structured manifest handling; not a runtime dependency and no source was copied.
-
-SteamDB scraping is not used.
+Protocol references: [Valve SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD) and [Valve depot documentation](https://partner.steamgames.com/doc/store/application/depots). No SteamDB scraping or SteamKit runtime dependency is used.

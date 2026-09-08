@@ -50,11 +50,10 @@ function Read-VdfObject {
     return ,$object
 }
 
-function Get-SteamAppInfoFromOutput {
-    param([string]$Text, [string]$AppId)
-    $null = Assert-SteamId $AppId
-    $start = [regex]::Match($Text, '(?m)^\s*"' + [regex]::Escape($AppId) + '"\s*\{')
-    if (-not $start.Success) { throw "AppInfo for $AppId is missing. Check the AppID, account access and Steam connection." }
+function Get-SteamVdfObjectFromOutput {
+    param([string]$Text, [string]$RootKey, [string]$Description='Steam metadata')
+    $start = [regex]::Match($Text, '(?m)^\s*"?' + [regex]::Escape($RootKey) + '"?\s*\{')
+    if (-not $start.Success) { throw "$Description for $RootKey is missing or incomplete." }
     $tail = $Text.Substring($start.Index)
     # Extract exactly one balanced object; SteamCMD prepends/appends console chatter.
     $quoted=$false; $escaped=$false; $depth=0; $opened=$false
@@ -72,9 +71,15 @@ function Get-SteamAppInfoFromOutput {
             $depth--
             if ($opened -and $depth -eq 0) {
                 $parsed=ConvertFrom-SteamVdf $tail.Substring(0,$i+1)
-                return ,$parsed[$AppId]
+                return ,$parsed[$RootKey]
             }
         }
     }
-    throw 'Truncated AppInfo output; no complete VDF object.'
+    throw "Truncated $Description output; no complete VDF object."
+}
+
+function Get-SteamAppInfoFromOutput {
+    param([string]$Text, [string]$AppId)
+    $null = Assert-SteamId $AppId
+    return ,(Get-SteamVdfObjectFromOutput -Text $Text -RootKey $AppId -Description 'AppInfo')
 }

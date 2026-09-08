@@ -2,7 +2,7 @@
 
 PowerShell cleaner for Windows that permanently removes everything inside the selected Steam installation except **steamapps**, **userdata**, and **steam.exe**. It does not clean separate Steam library folders.
 
-Also includes **Depot Downloader**: resolve an AppID, download accessible base-game depots with SteamCMD, keep versioned raw files, and assemble them into one verified game directory. It does not create Steam installation records or bypass account ownership.
+Also includes **Depot Downloader**: resolve an AppID, prove depot access from SteamCMD license/package metadata, download an exact manifest set, and assemble it into one verified game directory. It does not create Steam installation records or bypass account ownership.
 
 ## Steam Cleaner menu
 
@@ -10,25 +10,28 @@ Also includes **Depot Downloader**: resolve an AppID, download accessible base-g
 irm https://raw.githubusercontent.com/dholank/steam-cleaner/main/steam-cleaner.ps1 | iex
 ```
 
-Select **2: Depot Downloader**, press Enter for default settings, then enter an AppID and your Steam login name. Password and Steam Guard are entered directly in SteamCMD when prompted. Use `anonymous` only for applications that allow it. Depot IDs and manifest IDs are resolved automatically.
+Select **2: Depot Downloader**. A small Windows dialog lets you edit or browse to one **Download Location**, open an existing folder, and optionally keep temporary depot files. Continue saves the choice; Cancel changes nothing. Then enter an AppID and your Steam login name. Password and Steam Guard are entered directly in SteamCMD when prompted. Use `anonymous` only for applications that allow it.
 
 The menu launcher downloads the required PowerShell files from one immutable GitHub revision into a unique TEMP folder and starts a child PowerShell process with process-only execution-policy bypass. It does not change the saved Windows execution policy. Remote execution trusts this repository; inspect it first. Organizations that disallow this flow should use their approved local-script process. The original cleaner-only URL below still works independently.
 
-Defaults: Windows, x64, English, public branch, no DLC. SteamCMD/cache use `%LOCALAPPDATA%\SteamCleaner`; game output uses your Documents\SteamGames directory. Allow enough disk space for the SteamCMD spool, raw cache, and assembled output (potentially three copies). Earlier/interrupted SteamCMD spool folders are preserved rather than mixed into a new manifest.
+Defaults: Windows, x64, English, public branch, no DLC, and automatic temporary-cache cleanup. The default Download Location is `Documents\Steam Cleaner Downloads`; the saved choice is in `%LOCALAPPDATA%\SteamCleaner\settings.json`. For AppID `123`, temporary files use `<Download Location>\.depot-cache\123` and final files use `<Download Location>\<InstallDir>`. Logs stay in `%LOCALAPPDATA%\SteamCleaner\logs`.
 
-For custom drives/settings, download or clone this full repository and edit a copy of `config/depot-settings.example.json`. Keep cache, tools and output in separate directories outside the installed Steam client.
+For scripted use, download or clone the full repository. CLI values override an explicit config file, which overrides saved settings and then defaults. Keep the Download Location outside the installed Steam client.
 
 ```powershell
 .\steam-cleaner.ps1
-.\steam-cleaner.ps1 -Action Download -AppId 2651280 -ConfigPath .\config\depot-settings.json
-.\steam-cleaner.ps1 -Action Reassemble -MetadataPath 'D:\SteamCleaner\DepotCache\APPID\SNAPSHOT\metadata.json' -ConfigPath .\config\depot-settings.json
+.\steam-cleaner.ps1 -Action Download -AppId 2651280 -UserName myaccount -DownloadRoot 'D:\Steam Cleaner Downloads' -KeepTemporaryDepots $false
+.\steam-cleaner.ps1 -Action Download -AppId 2651280 -UserName myaccount -ConfigPath .\config\depot-settings.json
+.\steam-cleaner.ps1 -Action Reassemble -MetadataPath 'D:\Steam Cleaner Downloads\.depot-cache\2651280\metadata.json' -DownloadRoot 'D:\Steam Cleaner Downloads'
 ```
 
 Use a game your account can access; the AppID above is only a usage example. No game-specific depot mappings are included. PowerShell 7 is recommended for large games/long paths. The full offline suite also runs on Windows PowerShell 5.1.
 
-Before downloading, the tool displays selected/skipped/review depots and confidence. Required ambiguous depots stop automatic mode. Different-content collisions stop assembly by default. To explicitly accept AppInfo enumeration order after review, set `"CollisionPolicy": "AppInfoOrder"`. This order is not claimed to be a guaranteed Steam mount order.
+Before downloading, the tool displays Game, AppID, Download Location, Temporary Cache, Final Output, and every depot decision. Explicit package grants may be selected; a depot absent from complete package grants is skipped with HIGH confidence. An app-level grant without a complete depot list becomes `REVIEW/LOW` and stops the download. Required shared depots must also be granted. Owned DLC remains excluded, zero-byte depots are recorded without work, and validated Steamworks Common Redistributables are not merged into the game.
 
-When successful, the output contains the **contents** of all selected depots under `<OutputRoot>\<InstallDir>`. Existing output is never replaced: choose another output root or cancel. Raw cache defaults to Keep. Choosing `n`, then `DELETE`, deletes only selected verified raw cache folders; metadata/receipts and the separate SteamCMD spool remain. Game prerequisites/install scripts are never executed.
+Assembly follows stored `MountOrder`; later depots win collisions under Valve's mounting rule, and every collision is logged. LOW-confidence order stops for review. Files are verified in `<InstallDir>.assembling-<id>` before a same-parent rename. Existing final output is never replaced: interactive use offers another root or Cancel.
+
+After **Files Ready / Assembly Complete**, the default removes exactly `.depot-cache\<AppID>`. Enabling **Keep temporary depot files** preserves metadata, receipts, and raw depots for reassembly. Any download, drift, assembly, or verification failure preserves the cache. Steam installation state and prerequisites are not changed.
 
 See [Depot Downloader architecture and operations](docs/depot-downloader.md) for cache layout, retry behavior, limitations and error recovery.
 
@@ -76,7 +79,7 @@ steam-cleaner.ps1         Shared CLI menu; local commands and remote package lau
 modules/                 Parser, resolver, SteamCMD, download, metadata and assembly
 config/                  Example non-secret downloader settings
 docs/                    Architecture and operational limitations
-tests/safety.tests.ps1    Isolated filesystem safety tests
+tests/                   119 offline checks, synthetic fixtures, and process/UI adapters
 tests/run-tests.ps1       Syntax checks and all offline suites
 .github/workflows/test.yml Windows PowerShell 5.1 and 7 checks
 ```

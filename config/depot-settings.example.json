@@ -4,10 +4,10 @@
   "Language": "english",
   "Branch": "public",
   "DLC": "None",
-  "CacheRoot": "D:\\SteamCleaner\\DepotCache",
-  "OutputRoot": "D:\\SteamGames",
+  "DownloadRoot": "D:\\Steam Cleaner Downloads",
+  "KeepTemporaryDepots": false,
   "SteamCmdPath": "",
   "ToolsRoot": "D:\\SteamCleaner\\SteamCMD",
   "TimeoutSeconds": 21600,
-  "CollisionPolicy": "Stop"
+  "CollisionPolicy": "ResolvedOrder"
 }

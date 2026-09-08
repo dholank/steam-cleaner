@@ -41,6 +41,57 @@ function Assert-SeparateDepotPaths {
     if ($a -eq $b -or $a.StartsWith($b + '\', [StringComparison]::OrdinalIgnoreCase) -or $b.StartsWith($a + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Cache, SteamCMD and output directories must not overlap.' }
 }
 
+function Get-SteamCleanerDataRoot {
+    if ([string]::IsNullOrWhiteSpace($env:LOCALAPPDATA)) { throw 'LOCALAPPDATA is unavailable.' }
+    return (Join-Path $env:LOCALAPPDATA 'SteamCleaner')
+}
+
+function Get-SteamCleanerSettingsPath { return (Join-Path (Get-SteamCleanerDataRoot) 'settings.json') }
+
+function Get-DepotCacheRoot {
+    param([Parameter(Mandatory=$true)]$Settings, [Parameter(Mandatory=$true)][string]$AppId)
+    $null = Assert-SteamId $AppId
+    return (Join-Path (Join-Path $Settings.DownloadRoot '.depot-cache') $AppId)
+}
+
+function Get-DepotOutputPath {
+    param([Parameter(Mandatory=$true)]$Settings, [Parameter(Mandatory=$true)][string]$InstallDir)
+    $safeName = ConvertTo-InstallDirectoryName $InstallDir
+    return (Join-Path $Settings.DownloadRoot $safeName)
+}
+
+function Test-DepotRootWritable {
+    param([Parameter(Mandatory=$true)][string]$Path, [switch]$Create)
+    try { $full = Assert-DepotPath $Path -Create:$Create } catch { return $false }
+    if (-not (Test-Path -LiteralPath $full -PathType Container)) { return $false }
+    $probe = Join-Path $full ('.steam-cleaner-write-probe-' + [guid]::NewGuid().ToString('N'))
+    try {
+        [IO.File]::WriteAllText($probe, 'probe', [Text.UTF8Encoding]::new($false))
+        return $true
+    } catch {
+        return $false
+    } finally {
+        if (Test-Path -LiteralPath $probe -PathType Leaf) { Remove-Item -LiteralPath $probe -Force -ErrorAction SilentlyContinue }
+    }
+}
+
+function Write-SteamCleanerSettings {
+    param([Parameter(Mandatory=$true)][string]$DownloadRoot, [Parameter(Mandatory=$true)][bool]$KeepTemporaryDepots, [string]$Path=(Get-SteamCleanerSettingsPath))
+    $validated = Assert-DepotPath $DownloadRoot -Create
+    if (-not (Test-DepotRootWritable $validated)) { throw 'Download Location is not writable.' }
+    $parent = Split-Path -Parent $Path
+    if (-not (Test-Path -LiteralPath $parent)) { $null = New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop }
+    $payload = [ordered]@{ SchemaVersion=1; DownloadRoot=$validated; KeepTemporaryDepots=$KeepTemporaryDepots; UpdatedUtc=[DateTime]::UtcNow.ToString('o') }
+    $temporary = Join-Path $parent ('.settings-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    try {
+        [IO.File]::WriteAllText($temporary, ($payload | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
+        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, $null) }
+        else { [IO.File]::Move($temporary, $Path) }
+    } finally {
+        if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+    }
+}
+
 function Write-DepotLog {
     param([string]$Message, [ValidateSet('INFO','WARN','ERROR')][string]$Level = 'INFO', [string]$LogPath)
     # Callers pass structured events, NEVER raw SteamCMD transcripts or credentials.
@@ -57,20 +108,43 @@ function Write-DepotLog {
 }
 
 function Get-DepotSettings {
-    param([string]$ConfigPath)
-    $base = Join-Path $env:LOCALAPPDATA 'SteamCleaner'
-    $settings = [ordered]@{ Platform='windows'; Architecture='x64'; Language='english'; Branch='public'; DLC='None'; CacheRoot=(Join-Path $base 'DepotCache'); OutputRoot=(Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'SteamGames'); SteamCmdPath=''; ToolsRoot=(Join-Path $base 'SteamCMD'); TimeoutSeconds=21600; CollisionPolicy='Stop' }
+    param([string]$ConfigPath, [string]$DownloadRoot, [Nullable[bool]]$KeepTemporaryDepots, [string]$StoredSettingsPath=(Get-SteamCleanerSettingsPath))
+    $base = Get-SteamCleanerDataRoot
+    $documents = [Environment]::GetFolderPath('MyDocuments')
+    $settings = [ordered]@{ Platform='windows'; Architecture='x64'; Language='english'; Branch='public'; DLC='None'; DownloadRoot=(Join-Path $documents 'Steam Cleaner Downloads'); KeepTemporaryDepots=$false; SteamCmdPath=''; ToolsRoot=(Join-Path $base 'SteamCMD'); TimeoutSeconds=21600; CollisionPolicy='ResolvedOrder' }
+
+    if (Test-Path -LiteralPath $StoredSettingsPath -PathType Leaf) {
+        $stored = Get-Content -LiteralPath $StoredSettingsPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        foreach ($key in @('DownloadRoot','KeepTemporaryDepots')) {
+            if ($stored.PSObject.Properties[$key]) { $settings[$key] = $stored.$key }
+        }
+    }
+
     if ($ConfigPath) {
         $custom = Get-Content -LiteralPath $ConfigPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
+        $legacyCache = $custom.PSObject.Properties['CacheRoot']
+        $legacyOutput = $custom.PSObject.Properties['OutputRoot']
+        if ($legacyCache -or $legacyOutput) {
+            if (-not ($legacyCache -and $legacyOutput)) { throw 'Legacy migration requires both CacheRoot and OutputRoot. Set DownloadRoot instead; old data is not moved automatically.' }
+            $expected = [IO.Path]::GetFullPath((Join-Path ([string]$custom.OutputRoot) '.depot-cache')).TrimEnd('\')
+            $actual = [IO.Path]::GetFullPath([string]$custom.CacheRoot).TrimEnd('\')
+            if (-not $actual.Equals($expected, [StringComparison]::OrdinalIgnoreCase)) { throw 'Legacy CacheRoot must equal <OutputRoot>\.depot-cache before automatic migration. Set DownloadRoot manually; old data was not moved.' }
+            $settings.DownloadRoot = [string]$custom.OutputRoot
+        }
         foreach ($property in $custom.PSObject.Properties) {
+            if ($property.Name -in @('CacheRoot','OutputRoot')) { continue }
             if (-not $settings.Contains($property.Name)) { throw "Unknown setting: $($property.Name). Credentials do not belong in settings." }
             $settings[$property.Name] = $property.Value
         }
     }
-    if ($settings.Platform -notin @('windows') -or $settings.Architecture -notin @('x64','x86') -or $settings.DLC -ne 'None') { throw 'Version 1 supports Windows, x64/x86 and DLC=None.' }
+    if (-not [string]::IsNullOrWhiteSpace($DownloadRoot)) { $settings.DownloadRoot = $DownloadRoot }
+    if ($null -ne $KeepTemporaryDepots) { $settings.KeepTemporaryDepots = [bool]$KeepTemporaryDepots }
+    if ($settings.Platform -notin @('windows') -or $settings.Architecture -notin @('x64','x86') -or $settings.DLC -ne 'None') { throw 'Automatic mode supports Windows, x64/x86 and DLC=None.' }
     foreach ($key in @('Language','Branch')) { if ($settings[$key] -notmatch '^[a-zA-Z0-9_-]{1,64}$') { throw "Invalid $key setting." } }
-    if ($settings.CollisionPolicy -notin @('Stop','AppInfoOrder')) { throw 'CollisionPolicy must be Stop or AppInfoOrder.' }
+    if ($settings.CollisionPolicy -notin @('Stop','AppInfoOrder','ResolvedOrder')) { throw 'CollisionPolicy must be Stop, AppInfoOrder or ResolvedOrder.' }
     if ([int]$settings.TimeoutSeconds -lt 30 -or [int]$settings.TimeoutSeconds -gt 86400) { throw 'TimeoutSeconds must be 30..86400.' }
+    if ($settings.KeepTemporaryDepots -isnot [bool]) { throw 'KeepTemporaryDepots must be true or false.' }
+    $settings.DownloadRoot = Assert-DepotPath ([string]$settings.DownloadRoot)
     return [pscustomobject]$settings
 }
 

@@ -27,6 +27,15 @@ try {
     Reject { Invoke-SteamCmd -Exe $fakeExe -UserName failure -Operation AppInfo -AppId 100 } 'Process nonzero exit detected'
     Reject { Invoke-SteamCmd -Exe $fakeExe -UserName timeout -Operation AppInfo -AppId 100 -TimeoutSeconds 1 } 'Timed-out child process terminated'
     Reject { Invoke-SteamCmd -Exe $fakeExe -UserName 'name +quit' -Operation AppInfo -AppId 100 } 'Username cannot inject SteamCMD commands'
+    $destination=Assert-DepotPath (Join-Path $fixture 'destination with spaces') -Create
+    $null=Invoke-SteamCmd -Exe $fakeExe -UserName arguments -Operation Download -AppId 100 -DepotId 200 -ManifestId 300 -Destination $destination -TimeoutSeconds 10
+    $arguments=Get-Content -LiteralPath (Join-Path $fixture 'arguments.txt')
+    Check (($arguments -contains $destination) -and ($arguments -contains '0')) 'Custom destination remains one validated SteamCMD argument'
+    Check (Test-SteamCmdDownloadDestination $fakeExe anonymous 30 {param($e,$u,$o) [pscustomobject]@{Stdout='download_depot app depot [target manifestid] [delta manifestid] [destination folder]';Stderr=''}}) 'SteamCMD destination capability detected from help'
+    Check (-not (Test-SteamCmdDownloadDestination $fakeExe anonymous 30 {param($e,$u,$o) [pscustomobject]@{Stdout='download_depot app depot manifest';Stderr=''}})) 'Missing destination capability selects fallback mode'
+    $fallbackSettings=[pscustomobject]@{DownloadRoot=$fixture}
+    $fallback=Get-DepotSteamCmdRuntime $fakeExe $fallbackSettings $false {param($s) Join-Path $s.ToolsRoot 'steamcmd.exe'}
+    Check (-not $fallback.DirectDestination -and $fallback.Exe -like (Join-Path $fixture '.depot-cache\_steamcmd-runtime\*')) 'Fallback SteamCMD runtime stays under the selected drive cache'
     Write-Host "All $script:passed SteamCMD process checks passed."
 } finally {
     if (-not $fixture.StartsWith([IO.Path]::GetFullPath($env:TEMP).TrimEnd('\')+'\',[StringComparison]::OrdinalIgnoreCase) -or (Split-Path $fixture -Leaf) -notlike 'steam-process-test-*') { throw 'Unsafe fixture cleanup.' }

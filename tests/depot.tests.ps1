@@ -73,6 +73,9 @@ try {
     Check ((Read-DepotMetadata $metadataPath).Plan.InstallDir -ceq $unicodeName) 'Unicode metadata survives UTF8 roundtrip in both shells'
     $metadata.Plan.InstallDir='FixtureInstall'; $metadata.PlanKey=Get-DepotPlanKey $metadata.Plan
     Write-DepotJson $metadataPath $metadata
+    $plan.Depots[0].OrderConfidence='LOW'; Write-DepotJson $metadataPath $metadata
+    Reject { Get-DepotAssemblyPlan $metadata $cache 'ResolvedOrder' } 'LOW-confidence mount order blocks automatic assembly'
+    $plan.Depots[0].OrderConfidence='MEDIUM'; Write-DepotJson $metadataPath $metadata
     $result=Invoke-DepotAssembly $metadataPath $output
     Check ($result.Verified -and $result.FileCount -eq 3) 'Assembly verified from all depots'
     Check (Test-Path -LiteralPath (Join-Path $result.OutputPath 'file_900.txt')) 'Contents merged directly into InstallDir'

@@ -9,11 +9,11 @@ function Assert-ValveSteamCmd {
 }
 
 function Get-SteamCmdPath {
-    param($Settings)
-    if ($Settings.SteamCmdPath) { return Assert-ValveSteamCmd $Settings.SteamCmdPath }
+    param($Settings, [switch]$ManagedOnly)
+    if (-not $ManagedOnly -and $Settings.SteamCmdPath) { return Assert-ValveSteamCmd $Settings.SteamCmdPath }
     $managed=Join-Path $Settings.ToolsRoot 'steamcmd.exe'
     if (Test-Path -LiteralPath $managed) { return Assert-ValveSteamCmd $managed }
-    $found=Get-Command steamcmd.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    $found=if (-not $ManagedOnly) { Get-Command steamcmd.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1 }
     if ($found) { return Assert-ValveSteamCmd $found.Source }
     $root=Assert-DepotPath $Settings.ToolsRoot -Create
     Write-DepotLog 'Installing SteamCMD from Valve HTTPS CDN.'
@@ -58,20 +58,57 @@ function Get-SteamCmdFailure {
     return $null
 }
 
+function ConvertTo-SteamCmdArgument {
+    param([Parameter(Mandatory=$true)][string]$Value)
+    # ProcessStartInfo.Arguments uses the Windows C runtime quoting convention.
+    if ($Value -notmatch '[\s"]') { return $Value }
+    return '"' + ([regex]::Replace($Value, '(\\*)"', '$1$1\"') -replace '(\\+)$', '$1$1') + '"'
+}
+
+function Test-SteamCmdDownloadDestination {
+    param([string]$Exe, [string]$UserName='anonymous', [int]$TimeoutSeconds=120, [scriptblock]$Invoker)
+    $call = if ($Invoker) { & $Invoker $Exe $UserName 'Help' $null $null $null $null $null $TimeoutSeconds }
+            else { Invoke-SteamCmd -Exe $Exe -UserName $UserName -Operation Help -TimeoutSeconds $TimeoutSeconds }
+    $text = [string]$call.Stdout + "`n" + [string]$call.Stderr
+    return [bool]($text -match '(?im)download_depot[^\r\n]*(?:destination|download\s+dir|install\s+dir|\[dir\]|\[path\])')
+}
+
 function Invoke-SteamCmd {
-    param([string]$Exe, [string]$UserName, [ValidateSet('AppInfo','Download')][string]$Operation, [string]$AppId, [string]$DepotId, [string]$ManifestId, [int]$TimeoutSeconds=21600)
-    $null=Assert-SteamId $AppId
+    param(
+        [string]$Exe, [string]$UserName,
+        [ValidateSet('AppInfo','Download','LicensesForApp','Licenses','PackageInfo','Help')][string]$Operation,
+        [string]$AppId, [string]$DepotId, [string]$ManifestId, [string]$PackageId,
+        [string]$Destination, [string]$WorkingDirectory, [int]$TimeoutSeconds=21600
+    )
+    if ($Operation -in @('AppInfo','Download','LicensesForApp')) { $null=Assert-SteamId $AppId }
     if ($UserName -notmatch '^[a-zA-Z0-9_]{1,64}$') { throw 'Invalid account name.' }
-    $argsText="+@ShutdownOnFailedCommand 1 +@NoPromptForPassword 1 +login $UserName "
-    if ($Operation -eq 'AppInfo') { $argsText+="+app_info_update 1 +app_info_print $AppId +quit" }
+    $tokens=[Collections.Generic.List[string]]::new()
+    foreach ($token in @('+@ShutdownOnFailedCommand','1','+@NoPromptForPassword','1','+login',$UserName)) { $tokens.Add($token) }
+    if ($Operation -eq 'AppInfo') { foreach ($token in @('+app_info_update','1','+app_info_print',$AppId)) { $tokens.Add($token) } }
+    elseif ($Operation -eq 'LicensesForApp') { foreach ($token in @('+licenses_for_app',$AppId)) { $tokens.Add($token) } }
+    elseif ($Operation -eq 'Licenses') { $tokens.Add('+licenses_print') }
+    elseif ($Operation -eq 'PackageInfo') {
+        $null=Assert-SteamId $PackageId
+        foreach ($token in @('+package_info_print',$PackageId)) { $tokens.Add($token) }
+    } elseif ($Operation -eq 'Help') { foreach ($token in @('+help','download_depot')) { $tokens.Add($token) } }
     else {
         $null=Assert-SteamId $DepotId; $null=Assert-SteamId $ManifestId -Manifest
-        $argsText+="+download_depot $AppId $DepotId $ManifestId +quit"
+        foreach ($token in @('+download_depot',$AppId,$DepotId,$ManifestId)) { $tokens.Add($token) }
+        if ($Destination) {
+            $target=Assert-DepotPath $Destination -Create
+            # SteamCMD's optional delta manifest slot must be present before destination.
+            $tokens.Add('0'); $tokens.Add($target)
+        }
     }
+    $tokens.Add('+quit')
+    $escapedTokens=@($tokens | ForEach-Object { ConvertTo-SteamCmdArgument ([string]$_) })
+    $argsText=$escapedTokens -join ' '
     $null=Assert-ValveSteamCmd $Exe
+    if (-not $WorkingDirectory) { $WorkingDirectory=Split-Path -Parent $Exe }
+    $WorkingDirectory=Assert-DepotPath $WorkingDirectory -Create
     $process=[Diagnostics.Process]::new()
     $started=$false
-    $process.StartInfo=[Diagnostics.ProcessStartInfo]@{ FileName=$Exe; Arguments=$argsText; WorkingDirectory=(Split-Path -Parent $Exe); UseShellExecute=$false; RedirectStandardOutput=$true; RedirectStandardError=$true; RedirectStandardInput=$true; CreateNoWindow=$true }
+    $process.StartInfo=[Diagnostics.ProcessStartInfo]@{ FileName=$Exe; Arguments=$argsText; WorkingDirectory=$WorkingDirectory; UseShellExecute=$false; RedirectStandardOutput=$true; RedirectStandardError=$true; RedirectStandardInput=$true; CreateNoWindow=$true }
     $process.StartInfo.StandardOutputEncoding=[Text.UTF8Encoding]::new($false)
     $process.StartInfo.StandardErrorEncoding=[Text.UTF8Encoding]::new($false)
     try {
