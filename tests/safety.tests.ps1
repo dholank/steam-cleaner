@@ -40,10 +40,10 @@ try {
     New-Item -ItemType Junction -Path "$fixture/link" -Target "$fixture/steamapps" | Out-Null
     Reject { Get-CleanupPlan $fixture } 'Junction rejected without traversal'
     [IO.Directory]::Delete("$fixture/link")
-    function Read-Host { Set-Content -LiteralPath "$fixture/new.txt" -Value 'new'; "DELETE $fixture" }
+    function Read-Host { Set-Content -LiteralPath "$fixture/new.txt" -Value 'new'; 'DELETE' }
     Reject { Invoke-SteamCleanup -SteamPath $fixture } 'Changed plan rejected'
     Check (Test-Path -LiteralPath "$fixture/extra.txt") 'Changed plan performs no deletions'
-    function Read-Host { "DELETE $fixture" }
+    function Read-Host { 'DELETE' }
     Invoke-SteamCleanup -SteamPath $fixture
     Check (((Get-ChildItem -LiteralPath $fixture).Name | Sort-Object) -join ',' -eq 'steam.exe,steamapps,userdata') 'Only keep entries remain'
     Check ((Get-Content -LiteralPath "$fixture/steamapps/game.dat") -eq 'keep game') 'Game data preserved'
