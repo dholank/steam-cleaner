@@ -6,6 +6,8 @@ function Reject([scriptblock]$Action,$Message) { $failed=$false; try { & $Action
 $fixture=Join-Path $env:TEMP ('steam-settings-test-'+[guid]::NewGuid().ToString('N'))
 $null=New-Item -ItemType Directory -Path $fixture; $fixture=(Get-Item -LiteralPath $fixture).FullName
 try {
+    $fresh=Get-DepotSettings -StoredSettingsPath (Join-Path $fixture 'missing.json')
+    Check ($fresh.DownloadRoot -eq (Get-SteamCleanerDefaultDownloadRoot) -and $fresh.DownloadRoot -like '*\Downloads\Steam Cleaner Downloads') 'Fresh default uses the Windows Downloads folder'
     $storedPath=Join-Path $fixture 'local/settings.json'
     $storedRoot=Assert-DepotPath (Join-Path $fixture 'stored') -Create
     Write-SteamCleanerSettings $storedRoot $true $storedPath

@@ -48,6 +48,21 @@ function Get-SteamCleanerDataRoot {
 
 function Get-SteamCleanerSettingsPath { return (Join-Path (Get-SteamCleanerDataRoot) 'settings.json') }
 
+function Get-SteamCleanerDownloadsFolder {
+    $downloads=$null
+    try {
+        $shellFolders=Get-ItemProperty -LiteralPath 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\User Shell Folders' -ErrorAction Stop
+        $downloads=[string]$shellFolders.'{374DE290-123F-4565-9164-39C4925E467B}'
+        if ($downloads) { $downloads=[Environment]::ExpandEnvironmentVariables($downloads) }
+    } catch {}
+    if ([string]::IsNullOrWhiteSpace($downloads)) { $downloads=Join-Path ([Environment]::GetFolderPath('UserProfile')) 'Downloads' }
+    return [IO.Path]::GetFullPath($downloads)
+}
+
+function Get-SteamCleanerDefaultDownloadRoot {
+    return (Join-Path (Get-SteamCleanerDownloadsFolder) 'Steam Cleaner Downloads')
+}
+
 function Get-DepotCacheRoot {
     param([Parameter(Mandatory=$true)]$Settings, [Parameter(Mandatory=$true)][string]$AppId)
     $null = Assert-SteamId $AppId
@@ -112,13 +127,17 @@ function Write-DepotLog {
 function Get-DepotSettings {
     param([string]$ConfigPath, [string]$DownloadRoot, [Nullable[bool]]$KeepTemporaryDepots, [string]$StoredSettingsPath=(Get-SteamCleanerSettingsPath))
     $base = Get-SteamCleanerDataRoot
-    $documents = [Environment]::GetFolderPath('MyDocuments')
-    $settings = [ordered]@{ Platform='windows'; Architecture='x64'; Language='english'; Branch='public'; DLC='None'; DownloadRoot=(Join-Path $documents 'Steam Cleaner Downloads'); KeepTemporaryDepots=$false; SteamCmdPath=''; ToolsRoot=(Join-Path $base 'SteamCMD'); TimeoutSeconds=21600; CollisionPolicy='ResolvedOrder' }
+    $oldDefault = Join-Path ([Environment]::GetFolderPath('MyDocuments')) 'Steam Cleaner Downloads'
+    $newDefault = Get-SteamCleanerDefaultDownloadRoot
+    $settings = [ordered]@{ Platform='windows'; Architecture='x64'; Language='english'; Branch='public'; DLC='None'; DownloadRoot=$newDefault; KeepTemporaryDepots=$false; SteamCmdPath=''; ToolsRoot=(Join-Path $base 'SteamCMD'); TimeoutSeconds=21600; CollisionPolicy='ResolvedOrder' }
 
     if (Test-Path -LiteralPath $StoredSettingsPath -PathType Leaf) {
         $stored = Get-Content -LiteralPath $StoredSettingsPath -Raw -Encoding UTF8 -ErrorAction Stop | ConvertFrom-Json -ErrorAction Stop
         foreach ($key in @('DownloadRoot','KeepTemporaryDepots')) {
             if ($stored.PSObject.Properties[$key]) { $settings[$key] = $stored.$key }
+        }
+        if ([string]$settings.DownloadRoot -and [IO.Path]::GetFullPath([string]$settings.DownloadRoot).TrimEnd('\').Equals([IO.Path]::GetFullPath($oldDefault).TrimEnd('\'),[StringComparison]::OrdinalIgnoreCase)) {
+            $settings.DownloadRoot=$newDefault
         }
     }
 

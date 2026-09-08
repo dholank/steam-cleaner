@@ -15,7 +15,9 @@ Value precedence is:
 1. Local CLI parameters
 2. Explicit JSON config
 3. Saved dialog settings
-4. `Documents\Steam Cleaner Downloads`
+4. `Downloads\Steam Cleaner Downloads`
+
+A saved path that exactly matches the former `Documents\Steam Cleaner Downloads` default resolves to the new Downloads default. This changes the default selection only; old cache or output files are never moved or deleted.
 
 `DownloadRoot` is the only content-location input. For AppID `123` and InstallDir `Game`, paths are derived as:
 
@@ -106,7 +108,7 @@ powershell -NoProfile -File .\tests\run-tests.ps1
 pwsh -NoProfile -File .\tests\run-tests.ps1
 ```
 
-GitHub Actions runs syntax validation and the full suite in Windows PowerShell 5.1 and PowerShell 7. The 120-check suite covers the original 77 checks plus settings/UI adapters, atomic settings replacement, package grants, unknown entitlement, generic edition fixtures, DLC, zero-byte and shared depots, Common Redistributables, destination/fallback behavior, exact cache paths, retry/stale handling, disk capacity, cleanup, collision order, transactional output, and prohibited Steam state changes.
+GitHub Actions runs syntax validation and the full suite in Windows PowerShell 5.1 and PowerShell 7. The 121-check suite covers the original 77 checks plus settings/UI adapters, the Downloads default, atomic settings replacement, package grants, unknown entitlement, generic edition fixtures, DLC, zero-byte and shared depots, Common Redistributables, destination/fallback behavior, exact cache paths, retry/stale handling, disk capacity, cleanup, collision order, transactional output, and prohibited Steam state changes.
 
 Optional live metadata smoke test:
 

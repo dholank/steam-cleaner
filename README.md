@@ -14,7 +14,7 @@ Select **2: Depot Downloader**. A small Windows dialog lets you edit or browse t
 
 The menu launcher downloads the required PowerShell files from one immutable GitHub revision into a unique TEMP folder and starts a child PowerShell process with process-only execution-policy bypass. It does not change the saved Windows execution policy. Remote execution trusts this repository; inspect it first. Organizations that disallow this flow should use their approved local-script process. The original cleaner-only URL below still works independently.
 
-Defaults: Windows, x64, English, public branch, no DLC, and automatic temporary-cache cleanup. The default Download Location is `Documents\Steam Cleaner Downloads`; the saved choice is in `%LOCALAPPDATA%\SteamCleaner\settings.json`. For AppID `123`, temporary files use `<Download Location>\.depot-cache\123` and final files use `<Download Location>\<InstallDir>`. Logs stay in `%LOCALAPPDATA%\SteamCleaner\logs`.
+Defaults: Windows, x64, English, public branch, no DLC, and automatic temporary-cache cleanup. The default Download Location is `Downloads\Steam Cleaner Downloads`; the saved choice is in `%LOCALAPPDATA%\SteamCleaner\settings.json`. A saved value that still matches the former Documents default is automatically updated in memory to the Downloads default; existing files are not moved. For AppID `123`, temporary files use `<Download Location>\.depot-cache\123` and final files use `<Download Location>\<InstallDir>`. Logs stay in `%LOCALAPPDATA%\SteamCleaner\logs`.
 
 For scripted use, download or clone the full repository. CLI values override an explicit config file, which overrides saved settings and then defaults. Keep the Download Location outside the installed Steam client.
 
@@ -79,7 +79,7 @@ steam-cleaner.ps1         Shared CLI menu; local commands and remote package lau
 modules/                 Parser, resolver, SteamCMD, download, metadata and assembly
 config/                  Example non-secret downloader settings
 docs/                    Architecture and operational limitations
-tests/                   120 offline checks, synthetic fixtures, and process/UI adapters
+tests/                   121 offline checks, synthetic fixtures, and process/UI adapters
 tests/run-tests.ps1       Syntax checks and all offline suites
 .github/workflows/test.yml Windows PowerShell 5.1 and 7 checks
 ```
