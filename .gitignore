@@ -1,3 +1,9 @@
 *.log
 *.tmp
 .DS_Store
+DepotCache/
+SteamCMD/
+SteamGames/
+*.lock
+*.assembling-*/
+config/depot-settings.json

@@ -1,0 +1,13 @@
+{
+  "Platform": "windows",
+  "Architecture": "x64",
+  "Language": "english",
+  "Branch": "public",
+  "DLC": "None",
+  "CacheRoot": "D:\\SteamCleaner\\DepotCache",
+  "OutputRoot": "D:\\SteamGames",
+  "SteamCmdPath": "",
+  "ToolsRoot": "D:\\SteamCleaner\\SteamCMD",
+  "TimeoutSeconds": 21600,
+  "CollisionPolicy": "Stop"
+}

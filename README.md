@@ -2,6 +2,36 @@
 
 PowerShell cleaner for Windows that permanently removes everything inside the selected Steam installation except **steamapps**, **userdata**, and **steam.exe**. It does not clean separate Steam library folders.
 
+Also includes **Depot Downloader**: resolve an AppID, download accessible base-game depots with SteamCMD, keep versioned raw files, and assemble them into one verified game directory. It does not create Steam installation records or bypass account ownership.
+
+## Steam Cleaner menu
+
+```powershell
+irm https://raw.githubusercontent.com/dholank/steam-cleaner/main/steam-cleaner.ps1 | iex
+```
+
+Select **2: Depot Downloader**, press Enter for default settings, then enter an AppID and your Steam login name. Password and Steam Guard are entered directly in SteamCMD when prompted. Use `anonymous` only for applications that allow it. Depot IDs and manifest IDs are resolved automatically.
+
+The menu launcher downloads the required PowerShell files from one immutable GitHub revision into a unique TEMP folder and starts a child PowerShell process with process-only execution-policy bypass. It does not change the saved Windows execution policy. Remote execution trusts this repository; inspect it first. Organizations that disallow this flow should use their approved local-script process. The original cleaner-only URL below still works independently.
+
+Defaults: Windows, x64, English, public branch, no DLC. SteamCMD/cache use `%LOCALAPPDATA%\SteamCleaner`; game output uses your Documents\SteamGames directory. Allow enough disk space for the SteamCMD spool, raw cache, and assembled output (potentially three copies). Earlier/interrupted SteamCMD spool folders are preserved rather than mixed into a new manifest.
+
+For custom drives/settings, download or clone this full repository and edit a copy of `config/depot-settings.example.json`. Keep cache, tools and output in separate directories outside the installed Steam client.
+
+```powershell
+.\steam-cleaner.ps1
+.\steam-cleaner.ps1 -Action Download -AppId 2651280 -ConfigPath .\config\depot-settings.json
+.\steam-cleaner.ps1 -Action Reassemble -MetadataPath 'D:\SteamCleaner\DepotCache\APPID\SNAPSHOT\metadata.json' -ConfigPath .\config\depot-settings.json
+```
+
+Use a game your account can access; the AppID above is only a usage example. No game-specific depot mappings are included. PowerShell 7 is recommended for large games/long paths. The full offline suite also runs on Windows PowerShell 5.1.
+
+Before downloading, the tool displays selected/skipped/review depots and confidence. Required ambiguous depots stop automatic mode. Different-content collisions stop assembly by default. To explicitly accept AppInfo enumeration order after review, set `"CollisionPolicy": "AppInfoOrder"`. This order is not claimed to be a guaranteed Steam mount order.
+
+When successful, the output contains the **contents** of all selected depots under `<OutputRoot>\<InstallDir>`. Existing output is never replaced: choose another output root or cancel. Raw cache defaults to Keep. Choosing `n`, then `DELETE`, deletes only selected verified raw cache folders; metadata/receipts and the separate SteamCMD spool remain. Game prerequisites/install scripts are never executed.
+
+See [Depot Downloader architecture and operations](docs/depot-downloader.md) for cache layout, retry behavior, limitations and error recovery.
+
 ## Run
 
 Close Steam fully, including its background service if running. Back up important files first: configuration, custom skins, mods, and anything outside the three retained items will be deleted without the Recycle Bin. Preserving userdata is not a guarantee that every game's saves are backed up.
@@ -42,8 +72,15 @@ Keep Steam closed and avoid changing the directory during cleanup. Checks reduce
 
 ```text
 clean-steam.ps1           Standalone remote entry point and functions
+steam-cleaner.ps1         Shared CLI menu; local commands and remote package launcher
+modules/                 Parser, resolver, SteamCMD, download, metadata and assembly
+config/                  Example non-secret downloader settings
+docs/                    Architecture and operational limitations
 tests/safety.tests.ps1    Isolated filesystem safety tests
+tests/run-tests.ps1       Syntax checks and all offline suites
 .github/workflows/test.yml Windows PowerShell 5.1 and 7 checks
 ```
 
 Run tests with `powershell -NoProfile -File .\tests\safety.tests.ps1` or `pwsh -NoProfile -File .\tests\safety.tests.ps1`. Tests use synthetic directories and never target an installed Steam client.
+
+For the complete suite, run `pwsh -NoProfile -File .\tests\run-tests.ps1` (or `powershell`). There is no separate package build or typecheck for this PowerShell project. The runner parses every PowerShell script before exercising the cleaner, resolver, filesystem pipeline and real child-process wrapper with a compiled offline fixture. Live Steam tests are opt-in; see the operations document.

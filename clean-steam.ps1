@@ -3,7 +3,7 @@
 param([string]$SteamPath, [switch]$PreviewOnly, [switch]$LoadOnly)
 
 function Assert-LocalDirectory {
-    param([Parameter(Mandatory)][string]$Path)
+    param([Parameter(Mandatory)][string]$Path, [switch]$AllowProtectedAncestor)
     if ($Path -notmatch '^[A-Za-z]:[\\/]') { throw 'Use an absolute local drive path.' }
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if (-not $item.PSIsContainer -or $item.PSProvider.Name -ne 'FileSystem') { throw 'Not a filesystem directory.' }
@@ -13,6 +13,8 @@ function Assert-LocalDirectory {
         $current = $current.Parent
     }
     $resolved = $item.FullName.TrimEnd('\')
+    # Downloader may create a child of Documents/drive root, but may never target the ancestor itself.
+    if ($AllowProtectedAncestor) { return $item.FullName }
     if ($resolved -eq [IO.Path]::GetPathRoot($resolved).TrimEnd('\')) { throw 'Drive roots are forbidden.' }
     foreach ($protected in @($env:USERPROFILE, $env:windir, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, [Environment]::GetFolderPath('MyDocuments'), [Environment]::GetFolderPath('Desktop'))) {
         if ($protected -and $resolved -eq $protected.TrimEnd('\')) { throw 'Protected directory rejected.' }

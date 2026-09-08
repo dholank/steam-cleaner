@@ -7,9 +7,9 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Windows PowerShell 5.1 safety tests
+      - name: Run Windows PowerShell 5.1 offline tests
         shell: powershell
-        run: ./tests/safety.tests.ps1
-      - name: Run PowerShell 7 safety tests
+        run: ./tests/run-tests.ps1
+      - name: Run PowerShell 7 offline tests
         shell: pwsh
-        run: ./tests/safety.tests.ps1
+        run: ./tests/run-tests.ps1
