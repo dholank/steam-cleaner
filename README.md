@@ -4,134 +4,134 @@
 ![Windows](https://img.shields.io/badge/platform-Windows-0078D6)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE)
 
-Steam Cleaner adalah script PowerShell untuk mereset file client Steam tanpa menghapus library game dan data pengguna.
+Steam Cleaner is a PowerShell script that resets the Steam client files without deleting your game library or user data.
 
-Script hanya mempertahankan:
+The script preserves only:
 
 ```text
 Steam\
-|- steamapps\   Game dan library Steam
-|- userdata\    Data pengguna dan sebagian save/config
-`- steam.exe    Launcher Steam
+|- steamapps\   Installed games and Steam libraries
+|- userdata\    User data and some save/configuration files
+`- steam.exe    Steam launcher
 ```
 
-Semua file dan folder lain di dalam lokasi instalasi Steam akan dihapus permanen.
+Every other file and folder inside the Steam installation directory is permanently deleted.
 
 > [!CAUTION]
-> Penghapusan tidak masuk Recycle Bin. Tutup Steam dan backup file custom yang berada di luar `steamapps` atau `userdata` sebelum melanjutkan.
+> Deleted items do not go to the Recycle Bin. Close Steam and back up any custom files stored outside `steamapps` or `userdata` before continuing.
 
-## Cara Menjalankan
+## Quick Start
 
-Buka PowerShell, lalu jalankan:
+Open PowerShell and run:
 
 ```powershell
 irm https://raw.githubusercontent.com/dholank/steam-cleaner/main/steam-cleaner.ps1 | iex
 ```
 
-Steam Cleaner akan:
+Steam Cleaner will:
 
-1. Mendeteksi lokasi instalasi Steam.
-2. Memvalidasi tanda tangan digital Valve pada `steam.exe`.
-3. Memastikan Steam dan proses latar belakangnya sudah ditutup.
-4. Menampilkan lokasi Steam, jumlah file, ukuran, dan daftar lengkap yang akan dihapus.
-5. Menunggu konfirmasi sebelum melakukan penghapusan.
-6. Memeriksa ulang isi folder agar perubahan mendadak tidak ikut terhapus.
+1. Detect the Steam installation directory.
+2. Validate the Valve digital signature on `steam.exe`.
+3. Confirm that Steam and its background processes are closed.
+4. Display the Steam location, target count, total size, and complete deletion list.
+5. Wait for explicit confirmation before deleting anything.
+6. Recheck the directory so newly created or changed items are not deleted unexpectedly.
 
-Saat konfirmasi muncul, ketik persis:
+When the confirmation prompt appears, type exactly:
 
 ```text
 DELETE
 ```
 
-Cukup ketik `DELETE`, tanpa path, tanda kutip, atau teks tambahan. Tekan Enter tanpa mengetik apa pun untuk membatalkan.
+Type only `DELETE`, without the path, quotation marks, or additional text. Press Enter without typing anything to cancel.
 
-## Preview Tanpa Menghapus
+## Preview Without Deleting
 
-Download script terlebih dahulu:
+Download the script first:
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/dholank/steam-cleaner/main/steam-cleaner.ps1 -OutFile .\steam-cleaner.ps1
 ```
 
-Lalu jalankan mode preview:
+Run it in preview mode:
 
 ```powershell
 .\steam-cleaner.ps1 -PreviewOnly
 ```
 
-Jika Steam berada di lokasi khusus:
+If Steam is installed in a custom location:
 
 ```powershell
 .\steam-cleaner.ps1 -SteamPath 'D:\Steam' -PreviewOnly
 ```
 
-Hapus `-PreviewOnly` setelah daftar target sudah diperiksa dan siap dibersihkan.
+Remove `-PreviewOnly` after reviewing the deletion list and when you are ready to clean the directory.
 
-## Yang Aman dan Yang Terhapus
+## What Is Preserved and Deleted
 
-| Lokasi | Hasil |
+| Location | Result |
 | --- | --- |
-| `steamapps` | Dipertahankan, termasuk game yang terpasang. |
-| `userdata` | Dipertahankan. |
-| `steam.exe` | Dipertahankan. |
-| File client Steam lainnya | Dihapus dan akan dibuat ulang oleh Steam. |
-| Skin, script, atau file custom di luar daftar aman | Dihapus. Backup terlebih dahulu bila masih diperlukan. |
-| Screenshot di luar `userdata` | Dihapus. Backup terlebih dahulu bila masih diperlukan. |
+| `steamapps` | Preserved, including installed games. |
+| `userdata` | Preserved. |
+| `steam.exe` | Preserved. |
+| Other Steam client files | Deleted and recreated by Steam when needed. |
+| Skins, scripts, or custom files outside the preserved locations | Deleted. Back them up first if needed. |
+| Screenshots stored outside `userdata` | Deleted. Back them up first if needed. |
 
-Steam biasanya mengunduh ulang file client yang diperlukan saat pertama kali dibuka setelah pembersihan.
+Steam will normally download the required client files again the first time it starts after cleanup.
 
-## Jika Terjadi Error
+## Troubleshooting
 
-### Steam masih berjalan
+### Steam is still running
 
-Pilih **Steam > Exit**, lalu periksa Task Manager. Steam Cleaner tidak menghentikan proses secara paksa.
+Select **Steam > Exit**, then check Task Manager. Steam Cleaner does not terminate Steam processes automatically.
 
-### Instalasi Steam tidak ditemukan
+### Steam installation was not found
 
-Gunakan versi lokal dan tentukan lokasinya:
+Use the downloaded script and provide the installation directory explicitly:
 
 ```powershell
 .\steam-cleaner.ps1 -SteamPath 'D:\Steam'
 ```
 
-### Tanda tangan digital tidak valid
+### The digital signature is invalid
 
-Pastikan `steam.exe` berasal dari instalasi resmi Steam. Script menolak executable tanpa tanda tangan Valve yang valid.
+Make sure `steam.exe` comes from an official Steam installation. The script rejects executables that do not have a valid Valve signature.
 
-### Isi folder berubah setelah preview
+### The directory changed after the preview
 
-Ada proses yang membuat atau mengubah file setelah preview ditampilkan. Tutup Steam dan program terkait, lalu jalankan script kembali.
+Another process created or modified files after the preview was displayed. Close Steam and related programs, then run Steam Cleaner again.
 
-## Perlindungan
+## Safety Measures
 
-- Menolak drive root, UNC path, relative path, junction, symbolic link, dan folder sistem.
-- Memastikan `steamapps`, `userdata`, dan `steam.exe` memiliki tipe yang benar dan bukan link.
-- Memvalidasi `steam.exe` menggunakan tanda tangan Authenticode Valve.
-- Tidak pernah mengikuti link ketika membaca atau menghapus isi folder.
-- Memeriksa ulang rencana penghapusan setelah konfirmasi.
-- Menghapus folder hanya setelah seluruh isinya yang terverifikasi sudah dihapus.
-- Berhenti jika Steam kembali berjalan atau target berubah selama proses.
+- Rejects drive roots, UNC paths, relative paths, junctions, symbolic links, and protected system directories.
+- Confirms that `steamapps`, `userdata`, and `steam.exe` have the expected types and are not links.
+- Validates `steam.exe` with its Valve Authenticode signature.
+- Never follows links while reading or deleting directory contents.
+- Rechecks the complete deletion plan after confirmation.
+- Deletes directories only after their verified contents have been removed.
+- Stops if Steam starts again or a target changes during cleanup.
 
-Remote execution mempercayai isi repository ini. Untuk penggunaan terkontrol, ganti `main` pada URL dengan commit SHA yang sudah diperiksa.
+Remote execution trusts the contents of this repository. For controlled use, replace `main` in the raw URL with a full commit SHA that you have reviewed.
 
 ## Development
 
-Struktur repository:
+Repository structure:
 
 ```text
-steam-cleaner.ps1            Cleaner utama dan entry point irm | iex
-clean-steam.ps1              Alias kompatibilitas untuk URL lama
-tests\safety.tests.ps1       Pemeriksaan dengan instalasi Steam sintetis
-tests\run-tests.ps1          Syntax validation dan test runner
-.github\workflows\test.yml  Windows PowerShell 5.1 dan PowerShell 7
+steam-cleaner.ps1            Main cleaner and irm | iex entry point
+clean-steam.ps1              Compatibility alias for the original URL
+tests\safety.tests.ps1       Checks using a synthetic Steam installation
+tests\run-tests.ps1          Syntax validation and test runner
+.github\workflows\test.yml  Windows PowerShell 5.1 and PowerShell 7
 ```
 
-Jalankan pemeriksaan offline:
+Run the offline checks:
 
 ```powershell
 powershell -NoProfile -File .\tests\run-tests.ps1
 pwsh -NoProfile -File .\tests\run-tests.ps1
 ```
 
-Fixture pengujian hanya memakai folder sementara yang dibuat khusus dan tidak menyentuh instalasi Steam pengguna.
+The test fixture uses a dedicated temporary directory and never touches the user's Steam installation.
 
