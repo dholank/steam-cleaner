@@ -1,89 +1,271 @@
 # Steam Cleaner
 
-PowerShell cleaner for Windows that permanently removes everything inside the selected Steam installation except **steamapps**, **userdata**, and **steam.exe**. It does not clean separate Steam library folders.
+[![Safety checks](https://github.com/dholank/steam-cleaner/actions/workflows/test.yml/badge.svg)](https://github.com/dholank/steam-cleaner/actions/workflows/test.yml)
+![Windows](https://img.shields.io/badge/platform-Windows-0078D6)
+![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE)
 
-Also includes **Depot Downloader**: resolve an AppID, prove depot access from SteamCMD license/package metadata, download an exact manifest set, and assemble it into one verified game directory. It does not create Steam installation records or bypass account ownership.
+Kumpulan tool PowerShell untuk membersihkan folder instalasi Steam dan mengunduh depot game melalui SteamCMD.
 
-## Steam Cleaner menu
+| Tool | Fungsi |
+| --- | --- |
+| **Steam Cleaner** | Menghapus isi folder instalasi Steam dan hanya mempertahankan `steamapps`, `userdata`, serta `steam.exe`. |
+| **Depot Downloader** | Memilih depot berdasarkan AppID dan lisensi akun, mengunduh manifest yang tepat, lalu menyatukan file ke satu folder game. |
+
+> [!CAUTION]
+> Steam Cleaner melakukan penghapusan permanen tanpa Recycle Bin. Tutup Steam dan buat backup sebelum menjalankannya.
+
+## Quick Start
+
+Buka PowerShell, lalu jalankan:
 
 ```powershell
 irm https://raw.githubusercontent.com/dholank/steam-cleaner/main/steam-cleaner.ps1 | iex
 ```
 
-Select **2: Depot Downloader**. A small Windows dialog lets you edit or browse to one **Download Location**, open an existing folder, and optionally keep temporary depot files. Continue saves the choice; Cancel changes nothing. Then enter an AppID and your Steam login name. Password and Steam Guard are entered directly in SteamCMD when prompted. Use `anonymous` only for applications that allow it.
+Pilih menu:
 
-The menu launcher downloads the required PowerShell files from one immutable GitHub revision into a unique TEMP folder and starts a child PowerShell process with process-only execution-policy bypass. It does not change the saved Windows execution policy. Remote execution trusts this repository; inspect it first. Organizations that disallow this flow should use their approved local-script process. The original cleaner-only URL below still works independently.
-
-Defaults: Windows, x64, English, public branch, no DLC, and automatic temporary-cache cleanup. The default Download Location is `Downloads\Steam Cleaner Downloads`; the saved choice is in `%LOCALAPPDATA%\SteamCleaner\settings.json`. A saved value that still matches the former Documents default is automatically updated in memory to the Downloads default; existing files are not moved. For AppID `123`, temporary files use `<Download Location>\.depot-cache\123` and final files use `<Download Location>\<InstallDir>`. Logs stay in `%LOCALAPPDATA%\SteamCleaner\logs`.
-
-For scripted use, download or clone the full repository. CLI values override an explicit config file, which overrides saved settings and then defaults. Keep the Download Location outside the installed Steam client.
-
-```powershell
-.\steam-cleaner.ps1
-.\steam-cleaner.ps1 -Action Download -AppId 2651280 -UserName myaccount -DownloadRoot 'D:\Steam Cleaner Downloads' -KeepTemporaryDepots $false
-.\steam-cleaner.ps1 -Action Download -AppId 2651280 -UserName myaccount -ConfigPath .\config\depot-settings.json
-.\steam-cleaner.ps1 -Action Reassemble -MetadataPath 'D:\Steam Cleaner Downloads\.depot-cache\2651280\metadata.json' -DownloadRoot 'D:\Steam Cleaner Downloads'
+```text
+[1] Clean Steam
+[2] Depot Downloader
+[3] Reassemble downloaded depots
+[Enter] Cancel
 ```
 
-Use a game your account can access; the AppID above is only a usage example. No game-specific depot mappings are included. PowerShell 7 is recommended for large games/long paths. The full offline suite also runs on Windows PowerShell 5.1.
+Persyaratan:
 
-Before downloading, the tool displays Game, AppID, Download Location, Temporary Cache, Final Output, and every depot decision. Explicit package grants may be selected; a depot absent from complete package grants is skipped with HIGH confidence. An app-level grant without a complete depot list becomes `REVIEW/LOW` and stops the download. Required shared depots must also be granted. Owned DLC remains excluded, zero-byte depots are recorded without work, and validated Steamworks Common Redistributables are not merged into the game.
+- Windows 10 atau 11.
+- Windows PowerShell 5.1 atau PowerShell 7.
+- Jalankan sebagai user biasa terlebih dahulu.
+- Koneksi internet diperlukan untuk Depot Downloader dan pemasangan SteamCMD pertama kali.
 
-Assembly follows stored `MountOrder`; later depots win collisions under Valve's mounting rule, and every collision is logged. LOW-confidence order stops for review. Files are verified in `<InstallDir>.assembling-<id>` before a same-parent rename. Existing final output is never replaced: interactive use offers another root or Cancel.
+## 1. Membersihkan Folder Steam
 
-After **Files Ready / Assembly Complete**, the default removes exactly `.depot-cache\<AppID>`. Enabling **Keep temporary depot files** preserves metadata, receipts, and raw depots for reassembly. Any download, drift, assembly, or verification failure preserves the cache. Steam installation state and prerequisites are not changed.
+Pilih **Clean Steam** dari menu utama. Tool akan:
 
-See [Depot Downloader architecture and operations](docs/depot-downloader.md) for cache layout, retry behavior, limitations and error recovery.
+1. Mendeteksi lokasi Steam.
+2. Memastikan `steam.exe` memiliki tanda tangan digital Valve.
+3. Memastikan Steam sudah ditutup.
+4. Menampilkan seluruh file dan folder yang akan dihapus.
+5. Meminta konfirmasi sebelum menghapus apa pun.
 
-## Run
+Untuk melanjutkan, ketik persis:
 
-Close Steam fully, including its background service if running. Back up important files first: configuration, custom skins, mods, and anything outside the three retained items will be deleted without the Recycle Bin. Preserving userdata is not a guarantee that every game's saves are backed up.
+```text
+DELETE
+```
+
+Jangan tambahkan path, tanda kutip, atau teks lain. Tekan Enter tanpa mengetik `DELETE` untuk membatalkan.
+
+Yang dipertahankan:
+
+```text
+Steam\
+├─ steamapps\
+├─ userdata\
+└─ steam.exe
+```
+
+File konfigurasi, skin, screenshot, mod, atau data lain di luar tiga item tersebut akan dihapus.
+
+### Cleaner saja
+
+Untuk langsung membuka cleaner tanpa menu:
 
 ```powershell
 irm https://raw.githubusercontent.com/dholank/steam-cleaner/main/clean-steam.ps1 | iex
 ```
 
-Review the displayed location and deletion list. To proceed, type only `DELETE` (uppercase), then press Enter. Do not include the folder path or quotes. Press Enter without typing, or enter anything else, to cancel. There is no unattended confirmation bypass.
-
-Remote execution trusts the current repository contents. Inspect the script first; for a stable version, replace `main` in the URL with a reviewed full commit SHA.
-
-### Preview or custom location
-
-Download the script, inspect it, then run:
+Preview tanpa menghapus:
 
 ```powershell
 Invoke-WebRequest https://raw.githubusercontent.com/dholank/steam-cleaner/main/clean-steam.ps1 -OutFile .\clean-steam.ps1
 .\clean-steam.ps1 -PreviewOnly
 .\clean-steam.ps1 -SteamPath 'D:\Steam' -PreviewOnly
-.\clean-steam.ps1 -SteamPath 'D:\Steam'
 ```
 
-Windows PowerShell 5.1 or PowerShell 7 on Windows is required. Follow your organization's execution policy; the script does not change it. Start without administrator privileges. If permission is denied, inspect the error and folder permissions before choosing to elevate.
+## 2. Mengunduh Depot Game
 
-## Safety behavior
+Pilih **Depot Downloader** untuk mengunduh file game yang dapat diakses oleh akun Steam.
 
-- Detects Steam through HKCU/HKLM registry entries and standard Program Files locations; ambiguous or missing installations require an explicit path.
-- Requires both retained directories and a valid Valve-signed steam.exe. A missing directory or signature validation failure stops cleanup; it does not relax checks automatically.
-- Rejects drive roots, common protected directories, UNC/relative paths, junctions and symbolic links in the path, retained entries, or deletion tree.
-- Checks for Steam processes before preview, after confirmation, and during deletion; never kills them automatically.
-- Enumerates hidden files, fails on unreadable content, and compares the deletion plan after confirmation.
-- Deletes files individually and directories only when empty. Never recursively follows links; stops on errors and never claims success after a partial failure.
+Alurnya:
 
-Keep Steam closed and avoid changing the directory during cleanup. Checks reduce accidental deletion but cannot provide transactional rollback or prevent a hostile concurrent process from changing filesystem paths between checks. Partial deletion is possible on errors. Restore from backup if needed. Running steam.exe afterward may recreate client files and download updates.
+1. Pilih **Download Location** melalui dialog Windows.
+2. Aktifkan **Keep temporary depot files** hanya jika cache ingin disimpan.
+3. Masukkan AppID game.
+4. Masukkan nama login Steam, atau `anonymous` untuk konten yang memang mendukungnya.
+5. Masukkan password dan Steam Guard langsung pada jendela SteamCMD.
+6. Periksa keputusan depot yang ditampilkan.
+7. Tunggu sampai muncul **Files Ready / Assembly Complete**.
 
-## Repository
+Password dan kode Steam Guard tidak diterima, disimpan, atau ditulis ke log oleh Steam Cleaner.
+
+### Lokasi file
+
+Default Download Location:
 
 ```text
-clean-steam.ps1           Standalone remote entry point and functions
-steam-cleaner.ps1         Shared CLI menu; local commands and remote package launcher
-modules/                 Parser, resolver, SteamCMD, download, metadata and assembly
-config/                  Example non-secret downloader settings
-docs/                    Architecture and operational limitations
-tests/                   121 offline checks, synthetic fixtures, and process/UI adapters
-tests/run-tests.ps1       Syntax checks and all offline suites
-.github/workflows/test.yml Windows PowerShell 5.1 and 7 checks
+C:\Users\<user>\Downloads\Steam Cleaner Downloads
 ```
 
-Run tests with `powershell -NoProfile -File .\tests\safety.tests.ps1` or `pwsh -NoProfile -File .\tests\safety.tests.ps1`. Tests use synthetic directories and never target an installed Steam client.
+Contoh untuk AppID `123` dan InstallDir `MyGame`:
 
-For the complete suite, run `pwsh -NoProfile -File .\tests\run-tests.ps1` (or `powershell`). There is no separate package build or typecheck for this PowerShell project. The runner parses every PowerShell script before exercising the cleaner, resolver, filesystem pipeline and real child-process wrapper with a compiled offline fixture. Live Steam tests are opt-in; see the operations document.
+```text
+Steam Cleaner Downloads\
+├─ .depot-cache\
+│  └─ 123\
+│     ├─ metadata.json
+│     ├─ receipt_<DepotID>.json
+│     └─ depot_<DepotID>\
+└─ MyGame\                 Final output
+```
+
+Setting dialog tersimpan di:
+
+```text
+%LOCALAPPDATA%\SteamCleaner\settings.json
+```
+
+Log non-rahasia tersimpan di:
+
+```text
+%LOCALAPPDATA%\SteamCleaner\logs
+```
+
+Cache AppID otomatis dihapus setelah download, assembly, dan verifikasi berhasil. Centang **Keep temporary depot files** untuk mempertahankan cache. Jika terjadi kegagalan, cache selalu dipertahankan agar dapat diperiksa atau dicoba kembali.
+
+### Cara depot dipilih
+
+Steam Cleaner membaca AppInfo, lisensi, dan package metadata melalui SteamCMD.
+
+| Status | Arti |
+| --- | --- |
+| `DOWNLOAD/HIGH` | Package akun secara eksplisit memberikan akses dan depot cocok dengan konfigurasi. |
+| `SKIP/HIGH` | Depot tidak dimiliki atau tidak cocok dengan OS, arsitektur, bahasa, atau kebijakan DLC. |
+| `REVIEW/LOW` | Metadata SteamCMD belum cukup untuk membuktikan keputusan secara aman. Download dihentikan. |
+| `ERROR` | Depot wajib, shared depot, ownership, edition, atau branch tidak dapat diakses. |
+
+Default konfigurasi adalah Windows, x64, English, public branch, dan `DLC=None`. DLC tetap dilewati meskipun dimiliki. Depot kosong dicatat tanpa diunduh. Steamworks Common Redistributables tidak digabungkan ke output game.
+
+### Assembly dan collision
+
+Depot digabungkan berdasarkan `MountOrder`; depot yang dipasang belakangan menang ketika dua depot memiliki file dengan path yang sama. Semua collision dicatat. Mount order dengan confidence rendah menghentikan assembly untuk review.
+
+Assembly dilakukan terlebih dahulu di:
+
+```text
+<InstallDir>.assembling-<id>
+```
+
+Seluruh hash diverifikasi sebelum folder tersebut diubah menjadi output final. Jika output final sudah ada, tool meminta lokasi lain atau membatalkan. Versi ini tidak melakukan update atau replace terhadap output lama.
+
+Hasil assembly hanya berupa file siap pakai. Tool tidak membuat `appmanifest`, tidak mendaftarkan instalasi ke Steam, tidak menjalankan prerequisite/install script, dan tidak meluncurkan game.
+
+## Penggunaan Noninteraktif
+
+Clone atau download repository ini untuk memakai parameter lokal:
+
+```powershell
+.\steam-cleaner.ps1 -Action Download `
+  -AppId 2651280 `
+  -UserName myaccount `
+  -DownloadRoot 'D:\Steam Cleaner Downloads' `
+  -KeepTemporaryDepots $false
+```
+
+Menggunakan config JSON:
+
+```powershell
+.\steam-cleaner.ps1 -Action Download `
+  -AppId 2651280 `
+  -UserName myaccount `
+  -ConfigPath .\config\depot-settings.json
+```
+
+Urutan prioritas setting:
+
+```text
+Parameter CLI → Config JSON → Setting tersimpan → Default
+```
+
+Lihat [`config/depot-settings.example.json`](config/depot-settings.example.json) untuk contoh config.
+
+## Reassemble dari Cache
+
+Jika opsi keep-cache diaktifkan, output dapat dibuat kembali tanpa mengunduh depot yang sama:
+
+```powershell
+.\steam-cleaner.ps1 -Action Reassemble `
+  -MetadataPath 'D:\Steam Cleaner Downloads\.depot-cache\2651280\metadata.json' `
+  -DownloadRoot 'D:\Steam Cleaner Downloads'
+```
+
+Receipt dan SHA256 inventory harus tetap cocok. Cache rusak atau ManifestID yang berbeda tidak akan digunakan secara diam-diam.
+
+## Troubleshooting
+
+### `Steam is running`
+
+Tutup Steam dari menu **Steam → Exit**, lalu periksa Task Manager. Tool tidak menghentikan proses Steam secara otomatis.
+
+### `REVIEW/LOW`
+
+SteamCMD tidak memberikan metadata package/depot yang cukup. Periksa akun, edition game, DLC, dan branch yang digunakan. Tool sengaja tidak menebak depot ambigu.
+
+### `Steam denied depot access`
+
+Pastikan akun memiliki game atau edition yang diperlukan. Login `anonymous` tidak dapat mengunduh sebagian besar game retail.
+
+### `Output already exists`
+
+Pilih Download Location lain atau pindahkan output lama secara manual. Tool tidak menimpa folder game yang sudah ada.
+
+### `Insufficient space`
+
+Download Location membutuhkan ruang untuk raw depot, staging assembly, output final, dan headroom. Kosongkan drive atau pilih drive lain.
+
+### Lokasi masih menunjuk Documents
+
+Versi terbaru menggunakan `Downloads\Steam Cleaner Downloads`. Setting yang masih persis menggunakan default Documents lama akan diarahkan ke default baru tanpa memindahkan atau menghapus data lama.
+
+## Perlindungan yang Diterapkan
+
+- Menolak drive root, UNC path, relative path, traversal, alternate data stream, junction, dan symbolic link.
+- Memvalidasi executable Steam dan SteamCMD melalui tanda tangan digital Valve.
+- Memeriksa ulang rencana penghapusan setelah konfirmasi.
+- Tidak mengikuti link saat membaca, menyalin, atau menghapus file.
+- Menghentikan download jika entitlement, manifest, branch, atau mount order ambigu.
+- Menulis metadata dan setting secara atomik.
+- Memverifikasi receipt dan SHA256 sebelum cache digunakan kembali.
+- Mempertahankan cache pada setiap kegagalan.
+
+Remote execution mempercayai isi repository ini. Periksa script sebelum menjalankannya. Untuk penggunaan terkontrol, ganti `main` pada raw URL dengan full commit SHA yang sudah diperiksa.
+
+## Development
+
+Jalankan seluruh 121 pemeriksaan offline:
+
+```powershell
+powershell -NoProfile -File .\tests\run-tests.ps1
+pwsh -NoProfile -File .\tests\run-tests.ps1
+```
+
+GitHub Actions menjalankan syntax validation dan seluruh suite pada Windows PowerShell 5.1 serta PowerShell 7. Fixture pengujian menggunakan folder sementara dan tidak menyentuh instalasi Steam pengguna.
+
+```text
+clean-steam.ps1            Standalone Steam cleaner
+steam-cleaner.ps1          Menu, local CLI, dan remote launcher
+modules/                   Resolver, SteamCMD, cache, metadata, UI, assembly
+config/                    Contoh setting non-rahasia
+docs/                      Dokumentasi teknis dan batasan operasional
+tests/                     Offline test suite dan synthetic fixtures
+.github/workflows/test.yml Windows PowerShell 5.1 dan 7 checks
+```
+
+Dokumentasi teknis lengkap tersedia di [`docs/depot-downloader.md`](docs/depot-downloader.md).
+
+## Referensi
+
+- [Valve SteamCMD](https://developer.valvesoftware.com/wiki/SteamCMD)
+- [Valve depot mounting rules](https://partner.steamgames.com/doc/store/application/depots)
+
+SteamKit dan SteamDB tidak digunakan sebagai runtime dependency.
