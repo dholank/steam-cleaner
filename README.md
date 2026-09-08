@@ -104,10 +104,10 @@ Another process created or modified files after the preview was displayed. Close
 
 ## Safety Measures
 
-- Rejects drive roots, UNC paths, relative paths, junctions, symbolic links, and protected system directories.
+- Rejects drive roots, UNC paths, relative paths, and protected system directories.
 - Confirms that `steamapps`, `userdata`, and `steam.exe` have the expected types and are not links.
 - Validates `steam.exe` with its Valve Authenticode signature.
-- Never follows links while reading or deleting directory contents.
+- Treats junctions and symbolic links as single deletion targets without opening or following their destinations.
 - Rechecks the complete deletion plan after confirmation.
 - Deletes directories only after their verified contents have been removed.
 - Stops if Steam starts again or a target changes during cleanup.

@@ -21,8 +21,9 @@ try {
     $revision = (Invoke-RestMethod 'https://api.github.com/repos/dholank/steam-cleaner/commits/main').sha
     if ($revision -notmatch '^[a-f0-9]{40}$') { throw 'Versi repository tidak dapat diverifikasi.' }
     $scriptText = Invoke-RestMethod "https://raw.githubusercontent.com/dholank/steam-cleaner/$revision/steam-cleaner.ps1"
-    & ([scriptblock]::Create([string]$scriptText))
 } catch {
     Write-Error "Steam Cleaner gagal dimuat: $_"
+    return
 }
+& ([scriptblock]::Create([string]$scriptText))
 

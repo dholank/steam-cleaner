@@ -41,8 +41,13 @@ try {
     Invoke-SteamCleanup -SteamPath $fixture
     Check (Test-Path -LiteralPath "$fixture/extra.txt") 'Cancellation retains deletion targets'
     New-Item -ItemType Junction -Path "$fixture/link" -Target "$fixture/steamapps" | Out-Null
-    Reject { Get-CleanupPlan $fixture } 'Junction rejected without traversal'
-    [IO.Directory]::Delete("$fixture/link")
+    $linkPlan = @(Get-CleanupPlan $fixture)
+    $linkTarget = @($linkPlan | Where-Object { $_.Path -eq "$fixture\link" })
+    Check ($linkTarget.Count -eq 1 -and $linkTarget[0].Link) 'Junction planned as one link target'
+    Check (-not @($linkPlan | Where-Object { $_.Path -like "$fixture\link\*" }).Count) 'Junction destination not traversed'
+    Remove-CleanupNode -Target $linkTarget[0] -Root $fixture
+    Check (-not (Test-Path -LiteralPath "$fixture/link")) 'Junction itself deleted'
+    Check (Test-Path -LiteralPath "$fixture/steamapps/game.dat") 'Junction destination preserved'
     function Read-Host { Set-Content -LiteralPath "$fixture/new.txt" -Value 'new'; 'DELETE' }
     Reject { Invoke-SteamCleanup -SteamPath $fixture } 'Changed plan rejected'
     Check (Test-Path -LiteralPath "$fixture/extra.txt") 'Changed plan performs no deletions'

@@ -104,8 +104,8 @@ function Get-CleanupNode {
     param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Root)
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if (-not $item.FullName.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Target berada di luar folder Steam.' }
-    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Link terdeteksi dan proses dihentikan: $Path" }
-    if ($item.PSIsContainer) {
+    $isLink = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    if ($item.PSIsContainer -and -not $isLink) {
         foreach ($child in (Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
             Get-CleanupNode -Path $child.FullName -Root $Root
         }
@@ -113,15 +113,44 @@ function Get-CleanupNode {
     [pscustomobject]@{
         Path      = $item.FullName
         Directory = $item.PSIsContainer
-        Length    = $(if ($item.PSIsContainer) { 0 } else { $item.Length })
+        Link      = $isLink
+        Length    = $(if ($item.PSIsContainer -or $isLink) { 0 } else { $item.Length })
         Modified  = $item.LastWriteTimeUtc.Ticks
     }
 }
 
+function Remove-CleanupNode {
+    param(
+        [Parameter(Mandatory)][object]$Target,
+        [Parameter(Mandatory)][string]$Root
+    )
+    Assert-SteamStopped
+    $parent = Split-Path -Parent $Target.Path
+    $null = Assert-LocalDirectory $parent
+    if (-not $Target.Path.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Target berada di luar folder Steam.' }
+    $item = Get-Item -LiteralPath $Target.Path -Force -ErrorAction Stop
+    $isLink = [bool]($item.Attributes -band [IO.FileAttributes]::ReparsePoint)
+    if ($isLink -ne [bool]$Target.Link) { throw 'Status link target berubah. Proses dihentikan.' }
+    if ($item.PSIsContainer -ne $Target.Directory) { throw 'Tipe target berubah. Proses dihentikan.' }
+
+    if ($isLink) {
+        # Delete only the link itself. Never enumerate or follow its destination.
+        if ($item.PSIsContainer) { [IO.Directory]::Delete($Target.Path, $false) }
+        else { [IO.File]::Delete($Target.Path) }
+        return
+    }
+    if (-not $item.PSIsContainer -and ($item.Length -ne $Target.Length -or $item.LastWriteTimeUtc.Ticks -ne $Target.Modified)) {
+        throw 'Target file berubah. Proses dihentikan.'
+    }
+    if ($item.PSIsContainer) { [IO.Directory]::Delete($Target.Path, $false) }
+    else { Remove-Item -LiteralPath $Target.Path -Force -ErrorAction Stop }
+}
+
 function Show-CleanupPlan {
     param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][object[]]$Plan)
-    $files = @($Plan | Where-Object { -not $_.Directory })
-    $directories = @($Plan | Where-Object { $_.Directory })
+    $files = @($Plan | Where-Object { -not $_.Directory -and -not $_.Link })
+    $directories = @($Plan | Where-Object { $_.Directory -and -not $_.Link })
+    $links = @($Plan | Where-Object { $_.Link })
     $bytes = [long](($files | Measure-Object -Property Length -Sum).Sum)
 
     Write-CleanerSection 'RINGKASAN'
@@ -130,25 +159,26 @@ function Show-CleanupPlan {
     Write-Host '  Dipertahankan: ' -NoNewline -ForegroundColor Gray
     Write-Host 'steamapps, userdata, steam.exe' -ForegroundColor Green
     Write-Host '  Akan dihapus : ' -NoNewline -ForegroundColor Gray
-    Write-Host ("{0} file, {1} folder ({2})" -f $files.Count, $directories.Count, (Format-ByteSize $bytes)) -ForegroundColor Yellow
+    Write-Host ("{0} file, {1} folder, {2} link ({3})" -f $files.Count, $directories.Count, $links.Count, (Format-ByteSize $bytes)) -ForegroundColor Yellow
 
     Write-CleanerSection 'PREVIEW PENGHAPUSAN'
     foreach ($target in $Plan) {
         $relative = $target.Path.Substring($Root.Length).TrimStart('\')
         $depth = @($relative -split '[\\/]').Count - 1
         $indent = '  ' + ('  ' * $depth)
-        $kind = if ($target.Directory) { '[DIR] ' } else { '[FILE]' }
-        $color = if ($target.Directory) { 'DarkYellow' } else { 'DarkGray' }
+        $kind = if ($target.Link) { '[LINK]' } elseif ($target.Directory) { '[DIR] ' } else { '[FILE]' }
+        $color = if ($target.Link) { 'Magenta' } elseif ($target.Directory) { 'DarkYellow' } else { 'DarkGray' }
         Write-Host ("{0}{1} {2}" -f $indent, $kind, $relative) -ForegroundColor $color
     }
 
-    [pscustomobject]@{ FileCount = $files.Count; DirectoryCount = $directories.Count; Bytes = $bytes }
+    [pscustomobject]@{ FileCount = $files.Count; DirectoryCount = $directories.Count; LinkCount = $links.Count; Bytes = $bytes }
 }
 
 function Invoke-SteamCleanup {
     [CmdletBinding()]
     param([string]$SteamPath, [switch]$PreviewOnly)
     $ErrorActionPreference = 'Stop'
+    $script:CleanupDeletionStarted = $false
     if ($env:OS -ne 'Windows_NT') { throw 'Steam Cleaner hanya dapat dijalankan di Windows.' }
 
     Write-CleanerHeader
@@ -195,19 +225,9 @@ function Invoke-SteamCleanup {
     $fresh = @(Get-CleanupPlan $root)
     if (($plan | ConvertTo-Json -Compress) -cne ($fresh | ConvertTo-Json -Compress)) { throw 'Isi folder berubah setelah preview. Jalankan Steam Cleaner lagi.' }
 
+    $script:CleanupDeletionStarted = $true
     foreach ($target in $plan) {
-        Assert-SteamStopped
-        $parent = Split-Path -Parent $target.Path
-        $null = Assert-LocalDirectory $parent
-        if (-not $target.Path.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Target berada di luar folder Steam.' }
-        $item = Get-Item -LiteralPath $target.Path -Force
-        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Target berubah menjadi link. Proses dihentikan.' }
-        if ($item.PSIsContainer -ne $target.Directory) { throw 'Tipe target berubah. Proses dihentikan.' }
-        if ($target.Directory) {
-            [IO.Directory]::Delete($target.Path, $false)
-        } else {
-            Remove-Item -LiteralPath $target.Path -Force -ErrorAction Stop
-        }
+        Remove-CleanupNode -Target $target -Root $root
     }
 
     $remaining = @(Get-ChildItem -LiteralPath $root -Force | Where-Object { $_.Name -notin @('steamapps', 'userdata', 'steam.exe') })
@@ -215,7 +235,7 @@ function Invoke-SteamCleanup {
 
     Write-CleanerSection 'SELESAI'
     Write-Host '  [OK] Steam berhasil dibersihkan.' -ForegroundColor Green
-    Write-Host ("  Dihapus      : {0} file, {1} folder ({2})" -f $summary.FileCount, $summary.DirectoryCount, (Format-ByteSize $summary.Bytes)) -ForegroundColor Gray
+    Write-Host ("  Dihapus      : {0} file, {1} folder, {2} link ({3})" -f $summary.FileCount, $summary.DirectoryCount, $summary.LinkCount, (Format-ByteSize $summary.Bytes)) -ForegroundColor Gray
     Write-Host '  Dipertahankan: steamapps, userdata, steam.exe' -ForegroundColor Green
     Write-Host '  Steam akan membuat ulang file client yang diperlukan saat dibuka.' -ForegroundColor Gray
     Write-Host ''
@@ -227,7 +247,8 @@ if (-not $LoadOnly) {
     } catch {
         Write-Host ''
         Write-Host '[ERROR] Steam Cleaner dihentikan.' -ForegroundColor Red
-        Write-Error "$($_.Exception.Message) Penghapusan yang sudah selesai sebelum error tidak dapat dibatalkan."
+        $impact = if ($script:CleanupDeletionStarted) { 'Sebagian target mungkin sudah terhapus sebelum error dan tidak dapat dikembalikan.' } else { 'Tidak ada file yang dihapus.' }
+        Write-Error "$($_.Exception.Message) $impact"
     }
 }
 
