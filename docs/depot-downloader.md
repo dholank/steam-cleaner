@@ -108,7 +108,7 @@ powershell -NoProfile -File .\tests\run-tests.ps1
 pwsh -NoProfile -File .\tests\run-tests.ps1
 ```
 
-GitHub Actions runs syntax validation and the full suite in Windows PowerShell 5.1 and PowerShell 7. The 121-check suite covers the original 77 checks plus settings/UI adapters, the Downloads default, atomic settings replacement, package grants, unknown entitlement, generic edition fixtures, DLC, zero-byte and shared depots, Common Redistributables, destination/fallback behavior, exact cache paths, retry/stale handling, disk capacity, cleanup, collision order, transactional output, and prohibited Steam state changes.
+GitHub Actions runs syntax validation and the full suite in Windows PowerShell 5.1 and PowerShell 7. The 123-check suite covers the original 77 checks plus settings/UI adapters, the Downloads default, atomic settings replacement, Valve certificate identities, package grants, unknown entitlement, generic edition fixtures, DLC, zero-byte and shared depots, Common Redistributables, destination/fallback behavior, exact cache paths, retry/stale handling, disk capacity, cleanup, collision order, transactional output, and prohibited Steam state changes.
 
 Optional live metadata smoke test:
 

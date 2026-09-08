@@ -1,10 +1,15 @@
+function Test-ValveCertificateSubject {
+    param([string]$Subject)
+    return [bool]($Subject -match '(?:^|,\s*)O=Valve(?: Corp(?:\.|oration)?)?(?:,|$)')
+}
+
 function Assert-ValveSteamCmd {
     param([string]$Path)
     $null=Assert-LocalDirectory (Split-Path -Parent $Path)
     $exe=Get-Item -LiteralPath $Path -Force -ErrorAction Stop
     if ($exe.Name -ne 'steamcmd.exe' -or $exe.PSIsContainer -or ($exe.Attributes -band [IO.FileAttributes]::ReparsePoint)) { throw 'Expected a regular steamcmd.exe file.' }
     $signature=Get-AuthenticodeSignature -LiteralPath $Path -ErrorAction Stop
-    if ($signature.Status -ne 'Valid' -or $signature.SignerCertificate.Subject -notmatch '(?:^|,\s*)O=Valve Corp(?:\.|oration)?(?:,|$)') { throw 'SteamCMD must have a valid Valve signature. Download it from Valve and check Windows certificate trust.' }
+    if ($signature.Status -ne 'Valid' -or -not (Test-ValveCertificateSubject $signature.SignerCertificate.Subject)) { throw 'SteamCMD must have a valid Valve signature. Download it from Valve and check Windows certificate trust.' }
     return $exe.FullName
 }
 

@@ -7,6 +7,8 @@ $fixture=Join-Path $env:TEMP ('steam-process-test-'+[guid]::NewGuid().ToString('
 $null=New-Item -ItemType Directory -Path $fixture
 $fixture=(Get-Item -LiteralPath $fixture).FullName
 try {
+    Check (Test-ValveCertificateSubject 'CN=Valve, OU=Digital ID, O=Valve, S=Washington, C=US') 'Current Valve certificate organization is accepted'
+    Check (-not (Test-ValveCertificateSubject 'CN=Valve Helper, O=Unrelated Publisher, C=US')) 'Non-Valve certificate organization is rejected'
     $fakeExe=Join-Path $fixture 'steamcmd.exe'
     $sourcePath=(Join-Path $PSScriptRoot 'fixtures/ProcessFixture.cs').Replace("'","''")
     $binaryPath=$fakeExe.Replace("'","''")

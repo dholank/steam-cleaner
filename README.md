@@ -242,7 +242,7 @@ Remote execution mempercayai isi repository ini. Periksa script sebelum menjalan
 
 ## Development
 
-Jalankan seluruh 121 pemeriksaan offline:
+Jalankan seluruh 123 pemeriksaan offline:
 
 ```powershell
 powershell -NoProfile -File .\tests\run-tests.ps1
