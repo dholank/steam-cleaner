@@ -10,7 +10,7 @@ Close Steam fully, including its background service if running. Back up importan
 irm https://raw.githubusercontent.com/dholank/steam-cleaner/main/clean-steam.ps1 | iex
 ```
 
-Review the displayed location and deletion list. To proceed, type `DELETE ` followed by the exact displayed full Steam path. Any other response cancels. There is no unattended confirmation bypass.
+Review the displayed location and deletion list. To proceed, type only `DELETE` (uppercase), then press Enter. Do not include the folder path or quotes. Press Enter without typing, or enter anything else, to cancel. There is no unattended confirmation bypass.
 
 Remote execution trusts the current repository contents. Inspect the script first; for a stable version, replace `main` in the URL with a reviewed full commit SHA.
 
