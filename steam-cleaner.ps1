@@ -1,90 +1,233 @@
 #requires -Version 5.1
 [CmdletBinding()]
 param(
-    [ValidateSet('Menu','Clean','Download','Reassemble')][string]$Action='Menu',
-    [string]$AppId, [string]$UserName, [string]$ConfigPath, [string]$MetadataPath, [string]$DownloadRoot,
-    [Nullable[bool]]$KeepTemporaryDepots,
-    [string]$SteamPath, [switch]$PreviewOnly, [switch]$LoadOnly
+    [string]$SteamPath,
+    [switch]$PreviewOnly,
+    [switch]$LoadOnly
 )
 
-# Keep the original single-file cleaner usable at its existing raw URL.
-# Remote invocation loads all modules from one immutable repository revision.
-if (-not $PSScriptRoot -or -not (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'modules/DepotSupport.ps1'))) {
-    if ($LoadOnly) { throw 'LoadOnly requires the complete local repository.' }
-    if ($PSBoundParameters.Count) { throw 'Use the full local repository for parameterized commands. The remote launcher opens the interactive menu.' }
-    $ErrorActionPreference='Stop'
-    $tempParent=Get-Item -LiteralPath $env:TEMP -Force -ErrorAction Stop
-    while ($null -ne $tempParent) {
-        if ($tempParent.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Remote launcher requires a TEMP directory without linked ancestors.' }
-        $tempParent=$tempParent.Parent
-    }
-    $releaseRoot=Join-Path $env:TEMP ('steam-cleaner-package-' + [guid]::NewGuid().ToString('N'))
-    $null=New-Item -ItemType Directory -Path $releaseRoot
-    try {
-        $revision=(Invoke-RestMethod 'https://api.github.com/repos/dholank/steam-cleaner/commits/main').sha
-        if ($revision -notmatch '^[a-f0-9]{40}$') { throw 'Could not pin the repository revision.' }
-        $files=@('steam-cleaner.ps1','clean-steam.ps1','modules/DepotSupport.ps1','modules/DepotUi.ps1','modules/SteamCmdClient.ps1','modules/AppInfoParser.ps1','modules/EntitlementResolver.ps1','modules/DepotResolver.ps1','modules/DepotMetadata.ps1','modules/DepotAssembler.ps1','modules/DepotDownloader.ps1')
-        foreach ($file in $files) {
-            $target=Join-Path $releaseRoot $file
-            $null=New-Item -ItemType Directory -Path (Split-Path -Parent $target) -Force
-            Invoke-WebRequest -Uri "https://raw.githubusercontent.com/dholank/steam-cleaner/$revision/$file" -OutFile $target -UseBasicParsing
-        }
-        Write-Host "Steam Cleaner revision: $revision"
-        # Policy bypass applies only to this explicit remote-execution child process.
-        # No password or Guard code is accepted as an argument.
-        $modern=Get-Command pwsh.exe -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
-        $engine=if ($modern) { $modern.Source } else { Join-Path $env:SystemRoot 'System32/WindowsPowerShell/v1.0/powershell.exe' }
-        & $engine -NoProfile -STA -ExecutionPolicy Bypass -File (Join-Path $releaseRoot 'steam-cleaner.ps1')
-    } catch { Write-Error "Steam Cleaner package download/start failed: $_" }
-    return
+function Write-CleanerHeader {
+    Write-Host ''
+    Write-Host '============================================================' -ForegroundColor DarkCyan
+    Write-Host '  STEAM CLEANER' -ForegroundColor Cyan
+    Write-Host '  Reset file inti Steam, pertahankan game dan data pengguna' -ForegroundColor Gray
+    Write-Host '============================================================' -ForegroundColor DarkCyan
+    Write-Host ''
 }
 
-$entryLoadOnly=$LoadOnly; $entrySteamPath=$SteamPath; $entryPreviewOnly=$PreviewOnly
-. "$PSScriptRoot/clean-steam.ps1" -LoadOnly
-$LoadOnly=$entryLoadOnly; $SteamPath=$entrySteamPath; $PreviewOnly=$entryPreviewOnly
-foreach ($module in @('DepotSupport','DepotUi','AppInfoParser','SteamCmdClient','EntitlementResolver','DepotResolver','DepotMetadata','DepotAssembler','DepotDownloader')) {
-    . "$PSScriptRoot/modules/$module.ps1"
+function Write-CleanerSection {
+    param([Parameter(Mandatory)][string]$Title)
+    Write-Host ''
+    Write-Host ('-- {0} ' -f $Title) -NoNewline -ForegroundColor Cyan
+    Write-Host ('-' * [Math]::Max(1, 54 - $Title.Length)) -ForegroundColor DarkCyan
+}
+
+function Format-ByteSize {
+    param([long]$Bytes)
+    if ($Bytes -ge 1GB) { return ('{0:N2} GB' -f ($Bytes / 1GB)) }
+    if ($Bytes -ge 1MB) { return ('{0:N2} MB' -f ($Bytes / 1MB)) }
+    if ($Bytes -ge 1KB) { return ('{0:N2} KB' -f ($Bytes / 1KB)) }
+    return ('{0} bytes' -f $Bytes)
+}
+
+function Test-ValveCertificateSubject {
+    param([string]$Subject)
+    return [bool]($Subject -match '(?:^|,\s*)O=Valve(?: Corp(?:\.|oration)?)?(?:,|$)')
+}
+
+function Assert-LocalDirectory {
+    param([Parameter(Mandatory)][string]$Path)
+    if ($Path -notmatch '^[A-Za-z]:[\\/]') { throw 'Gunakan path drive lokal yang absolut, contoh: C:\Program Files (x86)\Steam.' }
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (-not $item.PSIsContainer -or $item.PSProvider.Name -ne 'FileSystem') { throw 'Path tersebut bukan folder lokal.' }
+    $current = $item
+    while ($null -ne $current) {
+        if ($current.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Folder link tidak diizinkan: $($current.FullName)" }
+        $current = $current.Parent
+    }
+    $resolved = $item.FullName.TrimEnd('\')
+    if ($resolved -eq [IO.Path]::GetPathRoot($resolved).TrimEnd('\')) { throw 'Drive root tidak boleh dibersihkan.' }
+    foreach ($protected in @($env:USERPROFILE, $env:windir, $env:ProgramFiles, ${env:ProgramFiles(x86)}, $env:ProgramData, [Environment]::GetFolderPath('MyDocuments'), [Environment]::GetFolderPath('Desktop'))) {
+        if ($protected -and $resolved -eq $protected.TrimEnd('\')) { throw 'Folder sistem atau folder pengguna tidak boleh dibersihkan.' }
+    }
+    return $resolved
+}
+
+function Assert-SteamRoot {
+    param([Parameter(Mandatory)][string]$Path)
+    $root = Assert-LocalDirectory $Path
+    foreach ($name in @('steamapps', 'userdata', 'steam.exe')) {
+        $item = Get-Item -LiteralPath (Join-Path $root $name) -Force -ErrorAction Stop
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Item yang dipertahankan tidak boleh berupa link: $name" }
+        if (($name -eq 'steam.exe') -eq $item.PSIsContainer) { throw "Tipe item Steam tidak sesuai: $name" }
+    }
+    $exe = Join-Path $root 'steam.exe'
+    $signature = Get-AuthenticodeSignature -LiteralPath $exe -ErrorAction Stop
+    if ($signature.Status -ne 'Valid' -or -not (Test-ValveCertificateSubject $signature.SignerCertificate.Subject)) {
+        throw 'steam.exe harus memiliki tanda tangan digital Valve yang valid.'
+    }
+    return $root
+}
+
+function Find-SteamRoot {
+    $candidates = @()
+    foreach ($key in @('HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam')) {
+        $entry = Get-ItemProperty -LiteralPath $key -ErrorAction SilentlyContinue
+        if ($entry) {
+            $candidates += $entry.SteamPath
+            $candidates += $entry.InstallPath
+        }
+    }
+    if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'Steam' }
+    if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Steam' }
+    $valid = @(foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+        try { Assert-SteamRoot $candidate } catch { Write-Verbose $_ }
+    }) | Select-Object -Unique
+    if (@($valid).Count -ne 1) { throw 'Instalasi Steam tidak ditemukan secara unik. Jalankan file lokal dengan parameter -SteamPath.' }
+    return $valid
+}
+
+function Assert-SteamStopped {
+    $active = @(Get-Process -ErrorAction Stop | Where-Object { $_.ProcessName -match '^(steam.*|gameoverlayui|steamerrorreporter.*)$' })
+    if ($active.Count) { throw "Tutup Steam dan proses latar belakangnya terlebih dahulu: $($active.ProcessName -join ', ')" }
+}
+
+function Get-CleanupPlan {
+    param([Parameter(Mandatory)][string]$Root)
+    foreach ($item in (Get-ChildItem -LiteralPath $Root -Force -ErrorAction Stop)) {
+        if ($item.Name -in @('steamapps', 'userdata', 'steam.exe')) { continue }
+        Get-CleanupNode -Path $item.FullName -Root $Root
+    }
+}
+
+function Get-CleanupNode {
+    param([Parameter(Mandatory)][string]$Path, [Parameter(Mandatory)][string]$Root)
+    $item = Get-Item -LiteralPath $Path -Force -ErrorAction Stop
+    if (-not $item.FullName.StartsWith($Root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Target berada di luar folder Steam.' }
+    if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw "Link terdeteksi dan proses dihentikan: $Path" }
+    if ($item.PSIsContainer) {
+        foreach ($child in (Get-ChildItem -LiteralPath $Path -Force -ErrorAction Stop)) {
+            Get-CleanupNode -Path $child.FullName -Root $Root
+        }
+    }
+    [pscustomobject]@{
+        Path      = $item.FullName
+        Directory = $item.PSIsContainer
+        Length    = $(if ($item.PSIsContainer) { 0 } else { $item.Length })
+        Modified  = $item.LastWriteTimeUtc.Ticks
+    }
+}
+
+function Show-CleanupPlan {
+    param([Parameter(Mandatory)][string]$Root, [Parameter(Mandatory)][object[]]$Plan)
+    $files = @($Plan | Where-Object { -not $_.Directory })
+    $directories = @($Plan | Where-Object { $_.Directory })
+    $bytes = [long](($files | Measure-Object -Property Length -Sum).Sum)
+
+    Write-CleanerSection 'RINGKASAN'
+    Write-Host '  Lokasi Steam : ' -NoNewline -ForegroundColor Gray
+    Write-Host $Root -ForegroundColor White
+    Write-Host '  Dipertahankan: ' -NoNewline -ForegroundColor Gray
+    Write-Host 'steamapps, userdata, steam.exe' -ForegroundColor Green
+    Write-Host '  Akan dihapus : ' -NoNewline -ForegroundColor Gray
+    Write-Host ("{0} file, {1} folder ({2})" -f $files.Count, $directories.Count, (Format-ByteSize $bytes)) -ForegroundColor Yellow
+
+    Write-CleanerSection 'PREVIEW PENGHAPUSAN'
+    foreach ($target in $Plan) {
+        $relative = $target.Path.Substring($Root.Length).TrimStart('\')
+        $depth = @($relative -split '[\\/]').Count - 1
+        $indent = '  ' + ('  ' * $depth)
+        $kind = if ($target.Directory) { '[DIR] ' } else { '[FILE]' }
+        $color = if ($target.Directory) { 'DarkYellow' } else { 'DarkGray' }
+        Write-Host ("{0}{1} {2}" -f $indent, $kind, $relative) -ForegroundColor $color
+    }
+
+    [pscustomobject]@{ FileCount = $files.Count; DirectoryCount = $directories.Count; Bytes = $bytes }
+}
+
+function Invoke-SteamCleanup {
+    [CmdletBinding()]
+    param([string]$SteamPath, [switch]$PreviewOnly)
+    $ErrorActionPreference = 'Stop'
+    if ($env:OS -ne 'Windows_NT') { throw 'Steam Cleaner hanya dapat dijalankan di Windows.' }
+
+    Write-CleanerHeader
+    Write-Host '[1/4] Mencari dan memvalidasi instalasi Steam...' -ForegroundColor Gray
+    if (-not $SteamPath) { $SteamPath = Find-SteamRoot }
+    $root = Assert-SteamRoot $SteamPath
+    Write-Host '[2/4] Memastikan Steam sudah ditutup...' -ForegroundColor Gray
+    Assert-SteamStopped
+    Write-Host '[3/4] Membuat rencana penghapusan...' -ForegroundColor Gray
+    $plan = @(Get-CleanupPlan $root)
+
+    if (-not $plan.Count) {
+        Write-CleanerSection 'SUDAH BERSIH'
+        Write-Host '  Tidak ada file atau folder yang perlu dihapus.' -ForegroundColor Green
+        Write-Host '  steamapps, userdata, dan steam.exe tetap aman.' -ForegroundColor Gray
+        Write-Host ''
+        return
+    }
+
+    $summary = Show-CleanupPlan -Root $root -Plan $plan
+    Write-CleanerSection 'PERHATIAN'
+    Write-Host '  Penghapusan bersifat permanen dan tidak masuk Recycle Bin.' -ForegroundColor Yellow
+    Write-Host '  Backup file custom di luar steamapps dan userdata jika masih diperlukan.' -ForegroundColor Yellow
+
+    if ($PreviewOnly) {
+        Write-Host ''
+        Write-Host '[PREVIEW] Belum ada file yang dihapus.' -ForegroundColor Cyan
+        Write-Host ''
+        return
+    }
+
+    Write-Host ''
+    if ((Read-Host 'Ketik DELETE untuk lanjut (Enter = batal)') -cne 'DELETE') {
+        Write-Host ''
+        Write-Host '[BATAL] Tidak ada file yang dihapus.' -ForegroundColor Yellow
+        Write-Host ''
+        return
+    }
+
+    Write-Host ''
+    Write-Host '[4/4] Menghapus target yang sudah diverifikasi...' -ForegroundColor Gray
+    $null = Assert-SteamRoot $root
+    Assert-SteamStopped
+    $fresh = @(Get-CleanupPlan $root)
+    if (($plan | ConvertTo-Json -Compress) -cne ($fresh | ConvertTo-Json -Compress)) { throw 'Isi folder berubah setelah preview. Jalankan Steam Cleaner lagi.' }
+
+    foreach ($target in $plan) {
+        Assert-SteamStopped
+        $parent = Split-Path -Parent $target.Path
+        $null = Assert-LocalDirectory $parent
+        if (-not $target.Path.StartsWith($root + '\', [StringComparison]::OrdinalIgnoreCase)) { throw 'Target berada di luar folder Steam.' }
+        $item = Get-Item -LiteralPath $target.Path -Force
+        if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) { throw 'Target berubah menjadi link. Proses dihentikan.' }
+        if ($item.PSIsContainer -ne $target.Directory) { throw 'Tipe target berubah. Proses dihentikan.' }
+        if ($target.Directory) {
+            [IO.Directory]::Delete($target.Path, $false)
+        } else {
+            Remove-Item -LiteralPath $target.Path -Force -ErrorAction Stop
+        }
+    }
+
+    $remaining = @(Get-ChildItem -LiteralPath $root -Force | Where-Object { $_.Name -notin @('steamapps', 'userdata', 'steam.exe') })
+    if ($remaining.Count) { throw 'File baru muncul selama proses. Periksa folder Steam.' }
+
+    Write-CleanerSection 'SELESAI'
+    Write-Host '  [OK] Steam berhasil dibersihkan.' -ForegroundColor Green
+    Write-Host ("  Dihapus      : {0} file, {1} folder ({2})" -f $summary.FileCount, $summary.DirectoryCount, (Format-ByteSize $summary.Bytes)) -ForegroundColor Gray
+    Write-Host '  Dipertahankan: steamapps, userdata, steam.exe' -ForegroundColor Green
+    Write-Host '  Steam akan membuat ulang file client yang diperlukan saat dibuka.' -ForegroundColor Gray
+    Write-Host ''
 }
 
 if (-not $LoadOnly) {
-    $ErrorActionPreference='Stop'
     try {
-        if ($env:OS -ne 'Windows_NT') { throw 'Steam Cleaner requires Windows.' }
-        $wasMenu=($Action -eq 'Menu')
-        if ($Action -eq 'Menu') {
-            Write-Host "Steam Cleaner`n-------------`n[1] Clean Steam`n[2] Depot Downloader`n[3] Reassemble downloaded depots`n[Enter] Cancel"
-            switch (Read-Host 'Choose an option') {
-                '1' { $Action='Clean' }
-                '2' { $Action='Download' }
-                '3' { $Action='Reassemble' }
-                default { return }
-            }
-            if ($Action -ne 'Clean') { $ConfigPath=Read-Host 'Settings JSON path (Enter = defaults)' }
-        }
-        if ($Action -eq 'Clean') { Invoke-SteamCleanup -SteamPath $SteamPath -PreviewOnly:$PreviewOnly; return }
-        $settings=Get-DepotSettings -ConfigPath $ConfigPath -DownloadRoot $DownloadRoot -KeepTemporaryDepots $KeepTemporaryDepots
-        if ($wasMenu -and $Action -in @('Download','Reassemble')) {
-            $settings=Select-DepotLocation $settings
-            if (-not $settings) { return }
-        }
-        if ($Action -eq 'Download') {
-            if (-not $AppId) { $AppId=Read-Host 'Enter AppID' }
-            if (-not $UserName) { $UserName=Read-Host 'Steam login name (or anonymous for supported free content)' }
-            Invoke-SteamDepotDownload $AppId $settings $UserName -InteractiveLocation:$wasMenu | Out-Null
-        } else {
-            if (-not $MetadataPath) { $MetadataPath=Read-Host 'Path to metadata.json' }
-            if ($wasMenu) {
-                $metadataPreview=Read-DepotMetadata $MetadataPath
-                while (Test-Path -LiteralPath (Get-DepotOutputPath $settings $metadataPreview.Plan.InstallDir)) {
-                    Write-Host 'The final output already exists. Choose another Download Location or cancel.'
-                    $settings=Select-DepotLocation $settings
-                    if (-not $settings) { return }
-                }
-            }
-            $logRoot=Assert-DepotPath (Join-Path (Get-SteamCleanerDataRoot) 'logs') -Create
-            $assemblyLog=Join-Path $logRoot ('assembly-'+[guid]::NewGuid().ToString('N')+'.log')
-            $result=Invoke-DepotAssembly -MetadataPath $MetadataPath -OutputRoot $settings.DownloadRoot -CollisionPolicy $settings.CollisionPolicy -LogPath $assemblyLog
-            Write-Host "Output: $($result.OutputPath)"
-        }
-    } catch { Write-Error "Steam Cleaner stopped: $_" }
+        Invoke-SteamCleanup -SteamPath $SteamPath -PreviewOnly:$PreviewOnly
+    } catch {
+        Write-Host ''
+        Write-Host '[ERROR] Steam Cleaner dihentikan.' -ForegroundColor Red
+        Write-Error "$($_.Exception.Message) Penghapusan yang sudah selesai sebelum error tidak dapat dibatalkan."
+    }
 }
+

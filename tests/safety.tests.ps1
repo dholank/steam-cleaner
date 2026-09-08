@@ -1,5 +1,5 @@
 $ErrorActionPreference = 'Stop'
-. "$PSScriptRoot/../clean-steam.ps1" -LoadOnly
+. "$PSScriptRoot/../steam-cleaner.ps1" -LoadOnly
 $script:passed = 0
 function Check($Condition, $Message) {
     if (-not $Condition) { throw "FAILED: $Message" }
@@ -22,6 +22,9 @@ try {
     Set-Content -LiteralPath "$fixture/userdata/save.dat" -Value 'keep save'
     Set-Content -LiteralPath "$fixture/cache/nested/file[1].txt" -Value 'delete'
     Set-Content -LiteralPath "$fixture/extra.txt" -Value 'delete'
+    Check (Test-ValveCertificateSubject 'CN=Valve, OU=Digital ID, O=Valve, C=US') 'Current Valve certificate identity accepted'
+    Check (Test-ValveCertificateSubject 'CN=Valve Corp., O=Valve Corporation, C=US') 'Legacy Valve certificate identity accepted'
+    Check (-not (Test-ValveCertificateSubject 'CN=Valve Support, O=Example Corp, C=US')) 'Unrelated publisher rejected'
     Reject { Assert-SteamRoot $fixture } 'Unsigned executable rejected'
     Reject { Assert-LocalDirectory ([IO.Path]::GetPathRoot($fixture)) } 'Drive root rejected'
     Reject { Assert-LocalDirectory '.' } 'Relative path rejected'
@@ -63,3 +66,4 @@ try {
     }
     [IO.Directory]::Delete($fixture, $false)
 }
+
