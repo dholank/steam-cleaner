@@ -16,11 +16,13 @@ New-Item -ItemType Directory -Path $fixture | Out-Null
 # Only this uniquely created synthetic directory may be deleted by tests.
 $fixture = (Get-Item -LiteralPath $fixture).FullName
 try {
-    New-Item -ItemType Directory -Path "$fixture/steamapps", "$fixture/userdata", "$fixture/cache/nested" -Force | Out-Null
+    New-Item -ItemType Directory -Path "$fixture/steamapps", "$fixture/userdata", "$fixture/appcache/nested", "$fixture/GTAV", "$fixture/Vortex" -Force | Out-Null
     Set-Content -LiteralPath "$fixture/steam.exe" -Value 'fake executable'
     Set-Content -LiteralPath "$fixture/steamapps/game.dat" -Value 'keep game'
     Set-Content -LiteralPath "$fixture/userdata/save.dat" -Value 'keep save'
-    Set-Content -LiteralPath "$fixture/cache/nested/file[1].txt" -Value 'delete'
+    Set-Content -LiteralPath "$fixture/appcache/nested/file[1].txt" -Value 'delete'
+    Set-Content -LiteralPath "$fixture/GTAV/GTA5.exe" -Value 'keep game outside steamapps'
+    Set-Content -LiteralPath "$fixture/Vortex/mod-state.json" -Value 'keep custom data'
     Set-Content -LiteralPath "$fixture/extra.txt" -Value 'delete'
     Check (Test-ValveCertificateSubject 'CN=Valve, OU=Digital ID, O=Valve, C=US') 'Current Valve certificate identity accepted'
     Check (Test-ValveCertificateSubject 'CN=Valve Corp., O=Valve Corporation, C=US') 'Legacy Valve certificate identity accepted'
@@ -35,34 +37,40 @@ try {
     Reject { Invoke-SteamCleanup -SteamPath $fixture -PreviewOnly } 'Running Steam rejected'
     function Get-Process { @() }
     function Read-Host { throw 'Preview must not prompt' }
+    $protected = @(Get-ProtectedCustomDirectories $fixture)
+    Check (($protected | Split-Path -Leaf | Sort-Object) -join ',' -eq 'GTAV,Vortex') 'Unknown top-level directories classified as protected'
+    $initialPlan = @(Get-CleanupPlan $fixture)
+    Check (-not @($initialPlan | Where-Object { $_.Path -like "$fixture\GTAV\*" -or $_.Path -like "$fixture\Vortex\*" }).Count) 'Protected directories excluded from deletion plan'
     Invoke-SteamCleanup -SteamPath $fixture -PreviewOnly
     Check (Test-Path -LiteralPath "$fixture/extra.txt") 'Preview retains deletion targets'
     function Read-Host { 'cancel' }
     Invoke-SteamCleanup -SteamPath $fixture
     Check (Test-Path -LiteralPath "$fixture/extra.txt") 'Cancellation retains deletion targets'
-    New-Item -ItemType Junction -Path "$fixture/link" -Target "$fixture/steamapps" | Out-Null
+    New-Item -ItemType Junction -Path "$fixture/bin" -Target "$fixture/steamapps" | Out-Null
     $linkPlan = @(Get-CleanupPlan $fixture)
-    $linkTarget = @($linkPlan | Where-Object { $_.Path -eq "$fixture\link" })
+    $linkTarget = @($linkPlan | Where-Object { $_.Path -eq "$fixture\bin" })
     Check ($linkTarget.Count -eq 1 -and $linkTarget[0].Link) 'Junction planned as one link target'
-    Check (-not @($linkPlan | Where-Object { $_.Path -like "$fixture\link\*" }).Count) 'Junction destination not traversed'
+    Check (-not @($linkPlan | Where-Object { $_.Path -like "$fixture\bin\*" }).Count) 'Junction destination not traversed'
     Remove-CleanupNode -Target $linkTarget[0] -Root $fixture
-    Check (-not (Test-Path -LiteralPath "$fixture/link")) 'Junction itself deleted'
+    Check (-not (Test-Path -LiteralPath "$fixture/bin")) 'Junction itself deleted'
     Check (Test-Path -LiteralPath "$fixture/steamapps/game.dat") 'Junction destination preserved'
     function Read-Host { Set-Content -LiteralPath "$fixture/new.txt" -Value 'new'; 'DELETE' }
     Reject { Invoke-SteamCleanup -SteamPath $fixture } 'Changed plan rejected'
     Check (Test-Path -LiteralPath "$fixture/extra.txt") 'Changed plan performs no deletions'
     function Read-Host { 'DELETE' }
     Invoke-SteamCleanup -SteamPath $fixture
-    Check (((Get-ChildItem -LiteralPath $fixture).Name | Sort-Object) -join ',' -eq 'steam.exe,steamapps,userdata') 'Only keep entries remain'
+    Check (((Get-ChildItem -LiteralPath $fixture).Name | Sort-Object) -join ',' -eq 'GTAV,steam.exe,steamapps,userdata,Vortex') 'Only core keep entries and protected custom folders remain'
     Check ((Get-Content -LiteralPath "$fixture/steamapps/game.dat") -eq 'keep game') 'Game data preserved'
     Check ((Get-Content -LiteralPath "$fixture/userdata/save.dat") -eq 'keep save') 'User data preserved'
+    Check ((Get-Content -LiteralPath "$fixture/GTAV/GTA5.exe") -eq 'keep game outside steamapps') 'Top-level game folder preserved'
+    Check ((Get-Content -LiteralPath "$fixture/Vortex/mod-state.json") -eq 'keep custom data') 'Top-level custom folder preserved'
     Write-Host "All $script:passed safety checks passed."
 } finally {
     $resolvedFixture = [IO.Path]::GetFullPath($fixture)
     $tempPrefix = [IO.Path]::GetFullPath($env:TEMP).TrimEnd('\') + '\'
     if (-not $resolvedFixture.StartsWith($tempPrefix, [StringComparison]::OrdinalIgnoreCase) -or (Split-Path $resolvedFixture -Leaf) -notlike 'steam-cleaner-test-*') { throw 'Unsafe test cleanup path' }
     # Reuse the non-following walker after removing retained files individually.
-    if (Test-Path -LiteralPath "$fixture/link") { [IO.Directory]::Delete("$fixture/link") }
+    if (Test-Path -LiteralPath "$fixture/bin") { [IO.Directory]::Delete("$fixture/bin") }
     foreach ($child in (Get-ChildItem -LiteralPath $fixture -Force)) {
         foreach ($node in @(Get-CleanupNode $child.FullName $fixture)) {
             if ($node.Directory) { [IO.Directory]::Delete($node.Path, $false) }

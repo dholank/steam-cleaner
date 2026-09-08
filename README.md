@@ -4,7 +4,7 @@
 ![Windows](https://img.shields.io/badge/platform-Windows-0078D6)
 ![PowerShell](https://img.shields.io/badge/PowerShell-5.1%20%7C%207-5391FE)
 
-Steam Cleaner is a PowerShell script that resets the Steam client files without deleting your game library or user data.
+Steam Cleaner is a PowerShell script that resets the Steam client files without deleting your game library, user data, or unrecognized top-level folders.
 
 The script preserves only:
 
@@ -12,10 +12,11 @@ The script preserves only:
 Steam\
 |- steamapps\   Installed games and Steam libraries
 |- userdata\    User data and some save/configuration files
+|- <custom>\     Unrecognized top-level folders, such as standalone games
 `- steam.exe    Steam launcher
 ```
 
-Every other file and folder inside the Steam installation directory is permanently deleted.
+Top-level files other than `steam.exe` and recognized Steam client directories are permanently deleted. Unrecognized top-level directories are shown as protected custom folders and are never opened or deleted.
 
 > [!CAUTION]
 > Deleted items do not go to the Recycle Bin. Close Steam and back up any custom files stored outside `steamapps` or `userdata` before continuing.
@@ -33,7 +34,7 @@ Steam Cleaner will:
 1. Detect the Steam installation directory.
 2. Validate the Valve digital signature on `steam.exe`.
 3. Confirm that Steam and its background processes are closed.
-4. Display the Steam location, target count, total size, and complete deletion list.
+4. Display the Steam location, protected custom folders, target count, total size, and complete deletion list.
 5. Wait for explicit confirmation before deleting anything.
 6. Recheck the directory so newly created or changed items are not deleted unexpectedly.
 
@@ -74,8 +75,9 @@ Remove `-PreviewOnly` after reviewing the deletion list and when you are ready t
 | `steamapps` | Preserved, including installed games. |
 | `userdata` | Preserved. |
 | `steam.exe` | Preserved. |
+| Unrecognized top-level folders | Preserved and displayed as protected custom folders. |
 | Other Steam client files | Deleted and recreated by Steam when needed. |
-| Skins, scripts, or custom files outside the preserved locations | Deleted. Back them up first if needed. |
+| Top-level scripts, DLLs, or other loose custom files | Deleted. Back them up first if needed. |
 | Screenshots stored outside `userdata` | Deleted. Back them up first if needed. |
 
 Steam will normally download the required client files again the first time it starts after cleanup.
@@ -106,6 +108,7 @@ Another process created or modified files after the preview was displayed. Close
 
 - Rejects drive roots, UNC paths, relative paths, and protected system directories.
 - Confirms that `steamapps`, `userdata`, and `steam.exe` have the expected types and are not links.
+- Preserves top-level directories that are not recognized Steam client components.
 - Validates `steam.exe` with its Valve Authenticode signature.
 - Treats junctions and symbolic links as single deletion targets without opening or following their destinations.
 - Rechecks the complete deletion plan after confirmation.
