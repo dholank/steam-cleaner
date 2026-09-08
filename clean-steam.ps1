@@ -91,8 +91,7 @@ function Invoke-SteamCleanup {
     $plan | ForEach-Object { Write-Host "DELETE: $($_.Path)" }
     if (-not $plan.Count) { Write-Host 'Nothing to delete.'; return }
     if ($PreviewOnly) { Write-Host 'Preview only. Nothing deleted.'; return }
-    $expected = "DELETE $root"
-    if ((Read-Host "Type exactly: $expected") -cne $expected) { Write-Host 'Cancelled. Nothing deleted.'; return }
+    if ((Read-Host 'Type DELETE to confirm permanent deletion, or press Enter to cancel') -cne 'DELETE') { Write-Host 'Cancelled. Nothing deleted.'; return }
     $null = Assert-SteamRoot $root
     Assert-SteamStopped
     $fresh = @(Get-CleanupPlan $root)
