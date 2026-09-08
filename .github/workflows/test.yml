@@ -5,11 +5,11 @@ permissions:
 jobs:
   test:
     runs-on: windows-latest
-    strategy:
-      matrix:
-        shell: [powershell, pwsh]
     steps:
       - uses: actions/checkout@v4
-      - name: Run isolated safety tests
-        shell: ${{ matrix.shell }}
+      - name: Run Windows PowerShell 5.1 safety tests
+        shell: powershell
+        run: ./tests/safety.tests.ps1
+      - name: Run PowerShell 7 safety tests
+        shell: pwsh
         run: ./tests/safety.tests.ps1
