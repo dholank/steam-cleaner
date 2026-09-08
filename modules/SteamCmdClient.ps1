@@ -40,8 +40,11 @@ function Connect-SteamCmd {
     Write-Host 'SteamCMD will ask for your password/Steam Guard directly. This application does not capture this session. Do not run under a PowerShell transcript.'
     $null=Assert-ValveSteamCmd $Exe
     # Native terminal handles password masking/Steam Guard. No secret in arguments or script files.
-    & $Exe '+login' $UserName '+quit'
-    if ($LASTEXITCODE -ne 0) { throw 'SteamCMD login did not finish successfully. Retry and complete Steam Guard in the native prompt.' }
+    Push-Location -LiteralPath (Split-Path -Parent $Exe)
+    try {
+        & $Exe '+login' $UserName '+quit'
+        if ($LASTEXITCODE -ne 0) { throw 'SteamCMD login did not finish successfully. Retry and complete Steam Guard in the native prompt.' }
+    } finally { Pop-Location }
 }
 
 function Get-SteamCmdFailure {

@@ -3,6 +3,7 @@ using System.Threading;
 public class ProcessFixture {
     public static int Main(string[] args) {
         string mode = args[Array.IndexOf(args, "+login") + 1];
+        if (mode == "directory") { System.IO.File.WriteAllText("cwd.txt", Environment.CurrentDirectory); return 0; }
         if (mode == "timeout") { Thread.Sleep(10000); return 0; }
         if (mode == "license") { Console.Error.WriteLine("ERROR! no subscription"); return 0; }
         if (mode == "guard") { Console.WriteLine("Steam Guard required"); return 0; }

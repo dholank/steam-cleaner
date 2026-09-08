@@ -17,6 +17,9 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Could not compile the process fixture.' }
     Reject { Assert-ValveSteamCmd $fakeExe } 'Unsigned SteamCMD executable rejected'
     function Assert-ValveSteamCmd { param($Path) return $Path }
+    $previousDirectory=(Get-Location).Path
+    Connect-SteamCmd -Exe $fakeExe -UserName directory
+    Check (([IO.File]::ReadAllText((Join-Path $fixture 'cwd.txt'))) -eq $fixture -and (Get-Location).Path -eq $previousDirectory) 'Native login uses tool directory and restores caller location'
     $reply=Invoke-SteamCmd -Exe $fakeExe -UserName anonymous -Operation AppInfo -AppId 100 -TimeoutSeconds 10
     Check ($reply.ExitCode -eq 0 -and $reply.Stdout.Length -eq 100000 -and $reply.Stderr.Length -eq 100000) 'Both process streams drained without deadlock'
     Reject { Invoke-SteamCmd -Exe $fakeExe -UserName license -Operation AppInfo -AppId 100 } 'Process license failure detected despite exit zero'
