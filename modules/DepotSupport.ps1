@@ -83,12 +83,14 @@ function Write-SteamCleanerSettings {
     if (-not (Test-Path -LiteralPath $parent)) { $null = New-Item -ItemType Directory -Path $parent -Force -ErrorAction Stop }
     $payload = [ordered]@{ SchemaVersion=1; DownloadRoot=$validated; KeepTemporaryDepots=$KeepTemporaryDepots; UpdatedUtc=[DateTime]::UtcNow.ToString('o') }
     $temporary = Join-Path $parent ('.settings-' + [guid]::NewGuid().ToString('N') + '.tmp')
+    $backup = Join-Path $parent ('.settings-backup-' + [guid]::NewGuid().ToString('N') + '.tmp')
     try {
         [IO.File]::WriteAllText($temporary, ($payload | ConvertTo-Json -Depth 5), [Text.UTF8Encoding]::new($false))
-        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, $null) }
+        if (Test-Path -LiteralPath $Path) { [IO.File]::Replace($temporary, $Path, $backup); Remove-Item -LiteralPath $backup -Force -ErrorAction Stop }
         else { [IO.File]::Move($temporary, $Path) }
     } finally {
         if (Test-Path -LiteralPath $temporary) { Remove-Item -LiteralPath $temporary -Force -ErrorAction SilentlyContinue }
+        if (Test-Path -LiteralPath $backup) { Remove-Item -LiteralPath $backup -Force -ErrorAction SilentlyContinue }
     }
 }
 

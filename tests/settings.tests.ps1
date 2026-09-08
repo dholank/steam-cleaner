@@ -11,6 +11,10 @@ try {
     Write-SteamCleanerSettings $storedRoot $true $storedPath
     $stored=Get-DepotSettings -StoredSettingsPath $storedPath
     Check ($stored.DownloadRoot -eq $storedRoot -and $stored.KeepTemporaryDepots) 'Stored download settings load'
+    Write-SteamCleanerSettings $storedRoot $false $storedPath
+    $overwritten=Get-DepotSettings -StoredSettingsPath $storedPath
+    Check (-not $overwritten.KeepTemporaryDepots) 'Existing settings file is replaced atomically'
+    Write-SteamCleanerSettings $storedRoot $true $storedPath
 
     $configRoot=Assert-DepotPath (Join-Path $fixture 'config-root') -Create
     $configPath=Join-Path $fixture 'config.json'

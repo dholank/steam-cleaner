@@ -79,7 +79,7 @@ steam-cleaner.ps1         Shared CLI menu; local commands and remote package lau
 modules/                 Parser, resolver, SteamCMD, download, metadata and assembly
 config/                  Example non-secret downloader settings
 docs/                    Architecture and operational limitations
-tests/                   119 offline checks, synthetic fixtures, and process/UI adapters
+tests/                   120 offline checks, synthetic fixtures, and process/UI adapters
 tests/run-tests.ps1       Syntax checks and all offline suites
 .github/workflows/test.yml Windows PowerShell 5.1 and 7 checks
 ```
