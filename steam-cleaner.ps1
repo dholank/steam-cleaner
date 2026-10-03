@@ -77,6 +77,40 @@ function Assert-SteamRoot {
     return $root
 }
 
+function Find-SteamRootsByExecutable {
+    $valid = @()
+    $skipDirectoryNames = @('Windows', 'ProgramData', 'WindowsApps', 'Recovery', '$Recycle.Bin', 'System Volume Information')
+
+    foreach ($drive in [IO.DriveInfo]::GetDrives()) {
+        if ($drive.DriveType -ne [IO.DriveType]::Fixed) { continue }
+        try { if (-not $drive.IsReady) { continue } } catch { continue }
+
+        $pending = New-Object System.Collections.Stack
+        $pending.Push($drive.RootDirectory.FullName)
+        while ($pending.Count -gt 0) {
+            $directoryPath = [string]$pending.Pop()
+            try { $items = Get-ChildItem -LiteralPath $directoryPath -Force -ErrorAction Stop } catch { continue }
+
+            foreach ($item in $items) {
+                if ($item.PSIsContainer) {
+                    if (($item.Attributes -band [IO.FileAttributes]::ReparsePoint) -or $item.Name -in $skipDirectoryNames) { continue }
+                    if ($env:windir -and [string]::Equals($item.FullName.TrimEnd('\'), $env:windir.TrimEnd('\'), [StringComparison]::OrdinalIgnoreCase)) { continue }
+                    $pending.Push($item.FullName)
+                    continue
+                }
+
+                if ($item.Name -ine 'steam.exe') { continue }
+                try { $root = Assert-SteamRoot (Split-Path -Parent $item.FullName) } catch { continue }
+                $alreadyFound = @($valid | Where-Object { [string]::Equals($_, $root, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+                if (-not $alreadyFound) { $valid += $root }
+                if ($valid.Count -ge 2) { return $valid }
+            }
+        }
+    }
+
+    return $valid
+}
+
 function Find-SteamRoot {
     $candidates = @()
     foreach ($key in @('HKCU:\Software\Valve\Steam', 'HKLM:\SOFTWARE\WOW6432Node\Valve\Steam', 'HKLM:\SOFTWARE\Valve\Steam')) {
@@ -91,8 +125,34 @@ function Find-SteamRoot {
     $valid = @(foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
         try { Assert-SteamRoot $candidate } catch { Write-Verbose $_ }
     }) | Select-Object -Unique
-    if (@($valid).Count -ne 1) { throw 'Instalasi Steam tidak ditemukan secara unik. Jalankan file lokal dengan parameter -SteamPath.' }
-    return $valid
+
+    if (@($valid).Count -eq 0) {
+        Write-Host 'Lokasi Steam belum ditemukan dari registry atau lokasi standar.' -ForegroundColor Yellow
+        Write-Host 'Mencari steam.exe di drive lokal. Pencarian ini bisa memerlukan waktu...' -ForegroundColor Gray
+        $valid = @(Find-SteamRootsByExecutable)
+    }
+
+    if (@($valid).Count -eq 1) { return $valid[0] }
+
+    if (@($valid).Count -gt 1) {
+        Write-Host 'Beberapa instalasi Steam yang valid ditemukan:' -ForegroundColor Yellow
+        foreach ($candidate in $valid) { Write-Host ('  {0}' -f $candidate) -ForegroundColor Gray }
+    } else {
+        Write-Host 'Instalasi Steam yang valid tidak ditemukan secara otomatis.' -ForegroundColor Yellow
+    }
+
+    Write-Host 'Masukkan folder instalasi yang ingin dibersihkan. Path akan divalidasi sebelum digunakan.' -ForegroundColor Gray
+    $manualPath = Read-Host 'Path Steam (Enter = batal)'
+    if ([string]::IsNullOrWhiteSpace($manualPath)) { throw 'Path Steam tidak diberikan. Proses dibatalkan.' }
+    $manualPath = $manualPath.Trim()
+    if ($manualPath.Length -ge 2) {
+        $firstCharacter = $manualPath.Substring(0, 1)
+        $lastCharacter = $manualPath.Substring($manualPath.Length - 1, 1)
+        if (($firstCharacter -eq '"' -and $lastCharacter -eq '"') -or ($firstCharacter -eq "'" -and $lastCharacter -eq "'")) {
+            $manualPath = $manualPath.Substring(1, $manualPath.Length - 2)
+        }
+    }
+    return Assert-SteamRoot $manualPath
 }
 
 function Assert-SteamStopped {

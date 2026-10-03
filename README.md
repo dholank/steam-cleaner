@@ -38,6 +38,8 @@ Steam Cleaner will:
 5. Wait for explicit confirmation before deleting anything.
 6. Recheck the directory so newly created or changed items are not deleted unexpectedly.
 
+Steam Cleaner checks the registry and standard install locations first. If those checks find no valid installation, it scans fixed local drives for `steam.exe`; this can take a while. Any discovered folder must contain `steamapps`, `userdata`, and a Valve-signed `steam.exe`. If more than one valid installation is found, Steam Cleaner asks for the full path to the one you want to clean. Press Enter to cancel.
+
 When the confirmation prompt appears, type exactly:
 
 ```text
@@ -90,7 +92,7 @@ Select **Steam > Exit**, then check Task Manager. Steam Cleaner does not termina
 
 ### Steam installation was not found
 
-Use the downloaded script and provide the installation directory explicitly:
+After automatic detection and the local drive scan, enter the full Steam folder path at the prompt. To provide it explicitly or run without prompts, download the script and use:
 
 ```powershell
 .\steam-cleaner.ps1 -SteamPath 'D:\Steam'
