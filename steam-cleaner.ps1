@@ -229,13 +229,13 @@ function Show-CleanupPlan {
     Write-Host ("{0} file, {1} folder, {2} link ({3})" -f $files.Count, $directories.Count, $links.Count, (Format-ByteSize $bytes)) -ForegroundColor Yellow
 
     Write-CleanerSection 'PREVIEW PENGHAPUSAN'
+    Write-Host '  Folder ditampilkan satu baris; isi di dalamnya tercakup dalam jumlah total.' -ForegroundColor Gray
     foreach ($target in $Plan) {
         $relative = $target.Path.Substring($Root.Length).TrimStart('\')
-        $depth = @($relative -split '[\\/]').Count - 1
-        $indent = '  ' + ('  ' * $depth)
+        if ($relative -match '[\\/]') { continue }
         $kind = if ($target.Link) { '[LINK]' } elseif ($target.Directory) { '[DIR] ' } else { '[FILE]' }
         $color = if ($target.Link) { 'Magenta' } elseif ($target.Directory) { 'DarkYellow' } else { 'DarkGray' }
-        Write-Host ("{0}{1} {2}" -f $indent, $kind, $relative) -ForegroundColor $color
+        Write-Host ("  {0} {1}" -f $kind, $relative) -ForegroundColor $color
     }
 
     [pscustomobject]@{ FileCount = $files.Count; DirectoryCount = $directories.Count; LinkCount = $links.Count; Bytes = $bytes }

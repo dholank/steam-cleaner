@@ -33,7 +33,7 @@ Steam Cleaner will:
 1. Detect the Steam installation directory.
 2. Validate the Valve digital signature on `steam.exe`.
 3. Confirm that Steam and its background processes are closed.
-4. Display the Steam location, target count, total size, and complete deletion list.
+4. Display the Steam location, target count, total size, and a concise deletion preview. Each folder appears once; its contents are included in the totals.
 5. Wait for explicit confirmation before deleting anything.
 6. Recheck the directory so newly created or changed items are not deleted unexpectedly.
 
