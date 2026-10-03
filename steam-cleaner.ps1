@@ -6,14 +6,6 @@ param(
     [switch]$LoadOnly
 )
 
-# Only these top-level directories are known Steam client components. Any other
-# top-level directory is preserved as user content instead of being guessed at.
-$script:SteamClientDirectories = @(
-    'appcache', 'bin', 'clientui', 'config', 'controller_base', 'depotcache',
-    'dumps', 'friends', 'graphics', 'logs', 'package', 'public', 'resource',
-    'steam', 'steamui', 'tenfoot', 'win32', 'win64'
-)
-
 function Write-CleanerHeader {
     Write-Host ''
     Write-Host '============================================================' -ForegroundColor DarkCyan
@@ -168,17 +160,7 @@ function Get-CleanupPlan {
     param([Parameter(Mandatory)][string]$Root)
     foreach ($item in (Get-ChildItem -LiteralPath $Root -Force -ErrorAction Stop)) {
         if ($item.Name -in @('steamapps', 'userdata', 'steam.exe')) { continue }
-        if ($item.PSIsContainer -and $item.Name -notin $script:SteamClientDirectories) { continue }
         Get-CleanupNode -Path $item.FullName -Root $Root
-    }
-}
-
-function Get-ProtectedCustomDirectories {
-    param([Parameter(Mandatory)][string]$Root)
-    foreach ($item in (Get-ChildItem -LiteralPath $Root -Force -ErrorAction Stop)) {
-        if (-not $item.PSIsContainer) { continue }
-        if ($item.Name -in @('steamapps', 'userdata')) { continue }
-        if ($item.Name -notin $script:SteamClientDirectories) { $item.FullName }
     }
 }
 
@@ -231,8 +213,7 @@ function Remove-CleanupNode {
 function Show-CleanupPlan {
     param(
         [Parameter(Mandatory)][string]$Root,
-        [Parameter(Mandatory)][object[]]$Plan,
-        [string[]]$ProtectedDirectories = @()
+        [Parameter(Mandatory)][object[]]$Plan
     )
     $files = @($Plan | Where-Object { -not $_.Directory -and -not $_.Link })
     $directories = @($Plan | Where-Object { $_.Directory -and -not $_.Link })
@@ -244,18 +225,8 @@ function Show-CleanupPlan {
     Write-Host $Root -ForegroundColor White
     Write-Host '  Dipertahankan: ' -NoNewline -ForegroundColor Gray
     Write-Host 'steamapps, userdata, steam.exe' -ForegroundColor Green
-    Write-Host '  Folder custom : ' -NoNewline -ForegroundColor Gray
-    Write-Host ("{0} dilindungi" -f @($ProtectedDirectories).Count) -ForegroundColor Green
     Write-Host '  Akan dihapus : ' -NoNewline -ForegroundColor Gray
     Write-Host ("{0} file, {1} folder, {2} link ({3})" -f $files.Count, $directories.Count, $links.Count, (Format-ByteSize $bytes)) -ForegroundColor Yellow
-
-    if (@($ProtectedDirectories).Count) {
-        Write-CleanerSection 'FOLDER CUSTOM DILINDUNGI'
-        foreach ($directory in $ProtectedDirectories) {
-            Write-Host ('  [KEEP] {0}' -f (Split-Path -Leaf $directory)) -ForegroundColor Green
-        }
-        Write-Host '  Folder tersebut tidak dikenali sebagai komponen client Steam dan tidak akan dibuka atau dihapus.' -ForegroundColor Gray
-    }
 
     Write-CleanerSection 'PREVIEW PENGHAPUSAN'
     foreach ($target in $Plan) {
@@ -284,24 +255,20 @@ function Invoke-SteamCleanup {
     Write-Host '[2/4] Memastikan Steam sudah ditutup...' -ForegroundColor Gray
     Assert-SteamStopped
     Write-Host '[3/4] Membuat rencana penghapusan...' -ForegroundColor Gray
-    $protectedDirectories = @(Get-ProtectedCustomDirectories $root)
     $plan = @(Get-CleanupPlan $root)
 
     if (-not $plan.Count) {
         Write-CleanerSection 'SUDAH BERSIH'
         Write-Host '  Tidak ada file atau folder yang perlu dihapus.' -ForegroundColor Green
         Write-Host '  steamapps, userdata, dan steam.exe tetap aman.' -ForegroundColor Gray
-        if ($protectedDirectories.Count) {
-            Write-Host ("  {0} folder custom juga dilindungi: {1}" -f $protectedDirectories.Count, (($protectedDirectories | ForEach-Object { Split-Path -Leaf $_ }) -join ', ')) -ForegroundColor Gray
-        }
         Write-Host ''
         return
     }
 
-    $summary = Show-CleanupPlan -Root $root -Plan $plan -ProtectedDirectories $protectedDirectories
+    $summary = Show-CleanupPlan -Root $root -Plan $plan
     Write-CleanerSection 'PERHATIAN'
     Write-Host '  Penghapusan bersifat permanen dan tidak masuk Recycle Bin.' -ForegroundColor Yellow
-    Write-Host '  Backup file custom di luar steamapps dan userdata jika masih diperlukan.' -ForegroundColor Yellow
+    Write-Host '  Semua isi lain, termasuk folder custom, akan dihapus. Backup yang masih diperlukan.' -ForegroundColor Yellow
 
     if ($PreviewOnly) {
         Write-Host ''
@@ -322,8 +289,6 @@ function Invoke-SteamCleanup {
     Write-Host '[4/4] Menghapus target yang sudah diverifikasi...' -ForegroundColor Gray
     $null = Assert-SteamRoot $root
     Assert-SteamStopped
-    $freshProtectedDirectories = @(Get-ProtectedCustomDirectories $root)
-    if (($protectedDirectories | ConvertTo-Json -Compress) -cne ($freshProtectedDirectories | ConvertTo-Json -Compress)) { throw 'Daftar folder custom berubah setelah preview. Jalankan Steam Cleaner lagi.' }
     $fresh = @(Get-CleanupPlan $root)
     if (($plan | ConvertTo-Json -Compress) -cne ($fresh | ConvertTo-Json -Compress)) { throw 'Isi folder berubah setelah preview. Jalankan Steam Cleaner lagi.' }
 
@@ -339,7 +304,6 @@ function Invoke-SteamCleanup {
     Write-Host '  [OK] Steam berhasil dibersihkan.' -ForegroundColor Green
     Write-Host ("  Dihapus      : {0} file, {1} folder, {2} link ({3})" -f $summary.FileCount, $summary.DirectoryCount, $summary.LinkCount, (Format-ByteSize $summary.Bytes)) -ForegroundColor Gray
     Write-Host '  Dipertahankan: steamapps, userdata, steam.exe' -ForegroundColor Green
-    if ($protectedDirectories.Count) { Write-Host ("  Folder custom : {0} tetap aman" -f $protectedDirectories.Count) -ForegroundColor Green }
     Write-Host '  Steam akan membuat ulang file client yang diperlukan saat dibuka.' -ForegroundColor Gray
     Write-Host ''
 }
@@ -354,4 +318,5 @@ if (-not $LoadOnly) {
         Write-Error "$($_.Exception.Message) $impact"
     }
 }
+
 
