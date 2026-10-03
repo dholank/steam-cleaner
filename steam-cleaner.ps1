@@ -122,9 +122,13 @@ function Find-SteamRoot {
     }
     if (${env:ProgramFiles(x86)}) { $candidates += Join-Path ${env:ProgramFiles(x86)} 'Steam' }
     if ($env:ProgramFiles) { $candidates += Join-Path $env:ProgramFiles 'Steam' }
-    $valid = @(foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
-        try { Assert-SteamRoot $candidate } catch { Write-Verbose $_ }
-    }) | Select-Object -Unique
+    $valid = @()
+    foreach ($candidate in ($candidates | Where-Object { $_ } | Select-Object -Unique)) {
+        try { $root = Assert-SteamRoot $candidate } catch { Write-Verbose $_; continue }
+        # Windows paths are case-insensitive, so registry and default paths may be the same install.
+        $alreadyFound = @($valid | Where-Object { [string]::Equals($_, $root, [StringComparison]::OrdinalIgnoreCase) }).Count -gt 0
+        if (-not $alreadyFound) { $valid += $root }
+    }
 
     if (@($valid).Count -eq 0) {
         Write-Host 'Lokasi Steam belum ditemukan dari registry atau lokasi standar.' -ForegroundColor Yellow
